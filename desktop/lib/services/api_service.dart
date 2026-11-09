@@ -550,11 +550,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 // ── Change this to your real Django server URL ──
-// const String kBaseUrl = 'https://realfaceai.app/api/v1';
+const String kBaseUrl = 'https://realfaceai.app/api/v1';
 
 // Dev: this Mac's LAN IP (phones can't reach 127.0.0.1). Changes with the
 // network — check with `ipconfig getifaddr en0`.
-const String kBaseUrl = 'http://10.112.60.138:8000/api/v1';
+// const String kBaseUrl = 'http://10.112.60.138:8000/api/v1';
 
 class ApiService {
   static final ApiService instance = ApiService._();
