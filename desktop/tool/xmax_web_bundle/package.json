@@ -1,0 +1,13 @@
+{
+  "name": "xmax-web-bundle",
+  "private": true,
+  "description": "Builds assets/js/rt.js (the desktop stream page's SDK) from @xmaxai/web-sdk",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@xmaxai/web-sdk": "1.1.1",
+    "esbuild": "0.24.2"
+  }
+}

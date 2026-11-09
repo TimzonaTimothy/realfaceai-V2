@@ -1,0 +1,9 @@
+{% extends "emails/base.html" %}
+{% block subject %}Your order was declined{% endblock %}
+{% block preheader %}We couldn't confirm your {{ product }} payment.{% endblock %}
+{% block kicker %}Order update{% endblock %}
+{% block content %}
+<p style="margin:0 0 10px;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#E5322D;">&#9679;&nbsp; Declined</p>
+<h1 class="rf-h1" style="margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;color:#0F1117;">We couldn&rsquo;t confirm your payment</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#3D414D;">Your order for <strong style="color:#0F1117;">{{ product }}</strong> (${{ amount }}) was declined. If you believe this is a mistake, reply to this email with your transaction details and we&rsquo;ll look into it.</p>
+{% endblock %}

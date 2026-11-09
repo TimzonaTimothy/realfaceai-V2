@@ -1,0 +1,9 @@
+env/
+staticfiles/
+*.log
+*.pot
+*.pyc
+__pycache__/
+/env
+.env
+.env-local

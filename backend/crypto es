@@ -1,0 +1,130 @@
+
+
+
+# ─── Wallet Encryption ───────────────────────────────────────────────────────
+# Fernet key — used to encrypt all private keys stored in the DB
+# WALLET_ENCRYPTION_KEY — Free, generate it yourself
+# python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+WALLET_ENCRYPTION_KEY = env("WALLET_ENCRYPTION_KEY", default="mpLITEXu7EX9JXd4A9l3uNAa32B0MAYwzNif9YWPg6Q=")
+# mpLITEXu7EX9JXd4A9l3uNAa32B0MAYwzNif9YWPg6Q=
+
+
+
+
+
+# ─── BEP-20 / BSC ────────────────────────────────────────────────────────────
+# HD wallet mnemonic for deterministic address derivation 12 phrases, Don't get this from any website. Generate it locally: 
+# pip install bip_utils
+# python -c "
+# from bip_utils import Bip39MnemonicGenerator, Bip39WordsNum
+# print(Bip39MnemonicGenerator().FromWordsNumber(Bip39WordsNum.WORDS_NUM_12))
+# "
+# Outputs something like:
+# word1 word2 word3 word4 word5 word6 word7 word8 word9 word10 word11 word12
+# Save this somewhere safe — losing it means losing access to all user deposit wallets forever.
+BSC_MASTER_MNEMONIC    = env("BSC_MASTER_MNEMONIC", default="electric twice drill also surround clock dose pencil spice wrap anger office")
+# electric twice drill also surround clock dose pencil spice wrap anger office
+
+
+
+
+# BSC_TREASURY_ADDRESS + BSC_TREASURY_PRIVATE_KEY — Free
+# This is just a BSC wallet you own that receives all swept funds. Get it from:
+
+# MetaMask (free) — metamask.io → Create wallet → copy address + export private key
+# Trust Wallet (free) — same thing
+
+# The address looks like 0x..., private key looks like 0x...64chars
+
+# Master treasury — all swept funds land here metamask address
+BSC_TREASURY_ADDRESS   = env("BSC_TREASURY_ADDRESS", default="0x7D2E4409b0Bd35Eb8Dd3f27E60D3C0fA8B24e7Ea")
+
+# Private key of the treasury address (needed to fund deposit wallets with BNB for gas) metamask private key
+BSC_TREASURY_PRIVATE_KEY = env("BSC_TREASURY_PRIVATE_KEY", default="87cb6461ba4b0498a3986014037bfd1ff7d01759377cb2ca88efbb2484813838")
+
+
+
+
+
+# BSC RPC endpoint — free public node or your own (Ankr, QuickNode, etc.)
+
+BSC_RPC_URL = env("BSC_RPC_URL", default="https://rpc.ankr.com/bsc/e6e14a69ecacf8d67c1831b95a6f96075d77acc9fdfb878bfbc0285c75630430")
+
+# Token contracts on BSC (defaults are mainnet)
+USDT_BEP20_CONTRACT = env("USDT_BEP20_CONTRACT", default="0x55d398326f99059ff775485246999027b3197955")
+USDC_BEP20_CONTRACT = env("USDC_BEP20_CONTRACT", default="0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d")
+
+# ─── Solana ──────────────────────────────────────────────────────────────────
+SOL_TREASURY_ADDRESS = env("SOL_TREASURY_ADDRESS", default="ExL82Y4aoQQGTJwznmV2kTWoGkMb8SPgxKeSnnodzh26")
+SOL_RPC_URL          = env("SOL_RPC_URL", default="https://api.mainnet-beta.solana.com")
+
+# SPL token mint addresses (mainnet)
+USDT_SOLANA_MINT = env("USDT_SOLANA_MINT", default="Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB")
+USDC_SOLANA_MINT = env("USDC_SOLANA_MINT", default="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")
+
+
+
+
+
+# ─── Cron Security ───────────────────────────────────────────────────────────
+# Random secret sent in X-Cron-Secret header when hitting /deposit/scan/
+# CRON_SECRET — Free, generate it yourself
+# Generate: python -c "import secrets; print(secrets.token_urlsafe(32))"
+CRON_SECRET = env("CRON_SECRET", default="IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0")
+
+
+
+
+# ─── Credits Rate ────────────────────────────────────────────────────────────
+# How many credits per $1 USD deposited
+CREDITS_PER_USD = env.int("CREDITS_PER_USD", default=50)
+
+# on render 
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/
+# for browser 
+# https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/?secret=IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0
+# on local  
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" http://localhost:8000/api/v1/payments/deposit/scan/
+
+
+
+# https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/bep20/
+# https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/solana/
+# https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/sweep/
+
+
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/bep20/
+
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/solana/
+
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" https://instantfaceai-django-backend.onrender.com/api/v1/payments/deposit/scan/sweep/
+
+
+# curl -s -H "X-Cron-Secret: IGKGMcMq6fIvs2SC5rqsqYz4DctR0Nwj1Yz12SHv2k0" http://127.0.0.1:8000/api/v1/payments/deposit/scan/bep20/    
+# Schedule: * * * * * (every minute — Render's minimum). For 10s, run a loop inside a worker instead.
+
+
+# commands to run on local  
+# python manage.py scan_bep20
+# python manage.py scan_solana
+# python manage.py run_sweeper
+
+
+# in cPanel → Cron Jobs, add these three (replace paths with your actual hosting paths):
+
+# # Every minute — BEP20 scan
+# * * * * * /home/username/virtualenv/myenv/bin/python /home/username/public_html/manage.py scan_bep20 >> /home/username/logs/scan_bep20.log 2>&1
+
+# # Every minute — Solana scan
+# * * * * * /home/username/virtualenv/myenv/bin/python /home/username/public_html/manage.py scan_solana >> /home/username/logs/scan_solana.log 2>&1
+
+# # Every minute — Sweeper
+# * * * * * /home/username/virtualenv/myenv/bin/python /home/username/public_html/manage.py run_sweeper >> /home/username/logs/run_sweeper.log 2>&1
+
+
+# # All users
+# python manage.py check_balance
+
+# # One specific user
+# python manage.py check_balance --email user@example.com

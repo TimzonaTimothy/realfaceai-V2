@@ -1,0 +1,77 @@
+{% load static %}<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{% block title %}RealFaceAI — Be anyone on the call{% endblock %}</title>
+  <meta name="description" content="{% block description %}RealFaceAI swaps your face onto any character in real time during live calls. Runs locally, no cloud uploads, no lag.{% endblock %}" />
+  <meta name="author" content="RealFaceAI" />
+  <meta name="robots" content="{% block robots %}index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1{% endblock %}" />
+  <meta name="application-name" content="RealFaceAI" />
+  <meta name="theme-color" content="{% block theme_color %}#0B0C10{% endblock %}" />
+  <link rel="canonical" href="{% block canonical %}https://realfaceai.app{{ request.path|default:'/' }}{% endblock %}" />
+  <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="RealFaceAI" />
+  <meta property="og:url" content="https://realfaceai.app{{ request.path|default:'/' }}" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:title" content="{% block og_title %}RealFaceAI — Be anyone on the call.{% endblock %}" />
+  <meta property="og:description" content="{% block og_description %}Real-time face swap for live calls. Upload a portrait, join your meeting, be anyone — running locally on your desktop.{% endblock %}" />
+  <meta property="og:image" content="{% block og_image %}https://realfaceai.app/static/images/og-image.png{% endblock %}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="RealFaceAI — Real-time face swap for live calls" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@RealFaceAI" />
+  <meta name="twitter:title" content="{% block tw_title %}RealFaceAI — Be anyone on the call.{% endblock %}" />
+  <meta name="twitter:description" content="{% block tw_description %}Real-time face swap for live calls. Upload a portrait, join your meeting, be anyone — running locally on your desktop.{% endblock %}" />
+  <meta name="twitter:image" content="https://realfaceai.app/static/images/og-image.png" />
+
+  <link rel="icon" href="{% static 'images/favicon.ico' %}" sizes="any" />
+  <link rel="icon" type="image/png" href="{% static 'images/apple-touch-icon.png' %}" />
+  <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'site/rf.css' %}?v=2" />
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@graph":[
+    {"@type":"Organization","@id":"https://realfaceai.app/#org","name":"RealFaceAI","legalName":"RealFaceAI Labs Inc.","url":"https://realfaceai.app/","logo":"https://realfaceai.app/static/images/logo.png","email":"support@realfaceai.app","sameAs":["https://x.com/RealFaceAI"],"contactPoint":{"@type":"ContactPoint","contactType":"customer support","email":"support@realfaceai.app"}},
+    {"@type":"WebSite","@id":"https://realfaceai.app/#website","url":"https://realfaceai.app/","name":"RealFaceAI","publisher":{"@id":"https://realfaceai.app/#org"},"inLanguage":"en"}
+  ]}
+  </script>
+  {% block jsonld %}{% endblock %}
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  {% include "site/_sprite.html" %}
+  <a href="#main" class="sr-skip" style="position:absolute;left:-9999px">Skip to content</a>
+
+  {% block nav %}{% include "site/_nav.html" %}{% endblock %}
+
+  {% block messages %}
+  {% if messages %}
+  <div class="toast-stack" role="status" aria-live="polite">
+    {% for message in messages %}
+    <div class="toast {{ message.tags }}" data-autohide>
+      <span class="toast__dot"></span>
+      <span>{{ message }}</span>
+      <button type="button" aria-label="Dismiss">&times;</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endblock %}
+
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+
+  {% block footer %}{% include "site/_footer.html" %}{% endblock %}
+
+  {% block data %}{% endblock %}
+  <script src="{% static 'site/rf.js' %}?v=2" defer></script>
+</body>
+</html>

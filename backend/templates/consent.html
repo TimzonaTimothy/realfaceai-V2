@@ -1,0 +1,137 @@
+{% extends "site/legal_base.html" %}
+
+{% block title %}Consent Policy — RealFaceAI{% endblock %}
+{% block description %}When consent is required to use a face in RealFaceAI, what valid consent looks like, and how violations are handled.{% endblock %}
+{% block doc_kicker %}Consent Policy{% endblock %}
+{% block doc_title %}Consent <span class="strike-soft">Policy</span>{% endblock %}
+{% block effective %}May 27, 2026{% endblock %}
+
+{% block toc %}
+      <a href="#purpose"><span>01</span>Purpose</a>
+      <a href="#the-core-rule"><span>02</span>The Core Rule</a>
+      <a href="#consent-requirements-by-use-case"><span>03</span>Consent Requirements by Use Case</a>
+      <a href="#what-valid-consent-looks-like"><span>04</span>What Valid Consent Looks Like</a>
+      <a href="#ai-generated-output-disclosure"><span>05</span>AI-Generated Output Disclosure</a>
+      <a href="#prohibited-uses"><span>06</span>Prohibited Uses</a>
+      <a href="#your-responsibility"><span>07</span>Your Responsibility</a>
+      <a href="#enforcement"><span>08</span>Enforcement</a>
+      <a href="#report"><span>09</span>How to Report a Violation</a>
+      <a href="#changes-to-this-policy"><span>10</span>Changes to This Policy</a>
+      <a href="#contact"><span>11</span>Contact</a>
+{% endblock %}
+
+{% block body %}
+    <div class="callout callout--warn">
+      <div class="callout__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9.5 17h-19L12 3z"/><path d="M12 10v4M12 17.5v.01"/></svg></div>
+      <div><b>Using someone else&rsquo;s face without consent is prohibited.</b><p>Violations result in immediate account termination and may be reported to relevant authorities. This policy exists to protect real people from harm.</p></div>
+    </div>
+    <section id="purpose">
+      <div class="n">01</div>
+      <div>
+        <h2>Purpose</h2>
+        <p>RealFaceAI is a real-time AI face-swap platform. Because our technology directly involves the likeness of real people, we hold consent to the highest standard. This policy defines when consent is required, what form it must take, and what happens when it is violated.</p>
+      </div>
+    </section>
+    <section id="the-core-rule">
+      <div class="n">02</div>
+      <div>
+        <h2>The Core Rule</h2>
+        <p>You may only use a face in RealFaceAI if one of the following is true:</p>
+        <ul><li>It is your own face.</li><li>You have obtained explicit, informed consent from the person whose face it is.</li><li>The face belongs to a fictional character, illustration, or AI-generated persona with no real-world identity.</li></ul>
+        <p>There are no exceptions to this rule.</p>
+      </div>
+    </section>
+    <section id="consent-requirements-by-use-case">
+      <div class="n">03</div>
+      <div>
+        <h2>Consent Requirements by Use Case</h2>
+        <p>Whether you need consent depends on whose face it is.</p>
+        <table class="matrix">
+          <thead><tr><th>Use case</th><th>Consent</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Your own face</td><td><span class="chip chip--ok">Not required</span></td><td>You own your own likeness.</td></tr>
+            <tr><td>Fictional character / illustration</td><td><span class="chip chip--ok">Not required</span></td><td>No real person&rsquo;s identity is involved.</td></tr>
+            <tr><td>AI-generated persona</td><td><span class="chip chip--ok">Not required</span></td><td>Must not resemble a real, identifiable person.</td></tr>
+            <tr><td>Friend, family member, colleague</td><td><span class="chip chip--req">Required</span></td><td>Written or recorded verbal consent. Keep proof.</td></tr>
+            <tr><td>Public figure / celebrity</td><td><span class="chip chip--req">Required</span></td><td>Explicit written consent from the individual or their authorised representative.</td></tr>
+            <tr><td>Any person, for deceptive content</td><td><span class="chip chip--no">Prohibited</span></td><td>Consent does not authorise fraud, defamation, or impersonation for deceptive purposes.</td></tr>
+            <tr><td>Minor (under 18)</td><td><span class="chip chip--no">Prohibited</span></td><td>No exceptions. RealFaceAI does not permit face-swaps of minors under any circumstances.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section id="what-valid-consent-looks-like">
+      <div class="n">04</div>
+      <div>
+        <h2>What Valid Consent Looks Like</h2>
+        <p>Consent must be:</p>
+        <ul><li><strong>Informed</strong> — the person knows their likeness will be used in an AI face-swap application.</li><li><strong>Explicit</strong> — a clear "yes", not assumed from silence, a social media post, or public appearance.</li><li><strong>Revocable</strong> — the person may withdraw consent at any time. You must stop using their likeness immediately upon withdrawal.</li><li><strong>Documented</strong> — you must be able to produce proof of consent if requested.</li></ul>
+        <p>A text message, email, or recorded verbal agreement are all acceptable forms of documentation.</p>
+      </div>
+    </section>
+    <section id="ai-generated-output-disclosure">
+      <div class="n">05</div>
+      <div>
+        <h2>AI-Generated Output Disclosure</h2>
+        <p>All content produced by RealFaceAI is AI-generated. When you share or publish output from the platform, you are required to disclose that the content is AI-generated. This applies to all distribution channels including social media, messaging apps, video platforms, and live streams.</p>
+        <p>Passing off AI-generated face-swap content as authentic footage of a real person — without disclosure — is a violation of this policy, our Terms of Use, and potentially applicable law in your jurisdiction.</p>
+        <div class="callout">
+          <div class="callout__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.5v.01"/></svg></div>
+          <div><b>How we handle disclosure in-app</b><p>RealFaceAI automatically labels all session output as &ldquo;AI-generated&rdquo; within the app interface. This labelling is part of our compliance with AI transparency requirements and cannot be disabled.</p></div>
+        </div>
+      </div>
+    </section>
+    <section id="prohibited-uses">
+      <div class="n">06</div>
+      <div>
+        <h2>Prohibited Uses</h2>
+        <p>Regardless of consent, the following uses are strictly prohibited:</p>
+        <ul><li>Creating non-consensual intimate imagery (NCII) of any person.</li><li>Impersonating a real person to deceive, defraud, or manipulate others.</li><li>Creating content designed to harass, defame, or cause reputational harm.</li><li>Using the likeness of any minor (under 18) in any context.</li><li>Generating content that could constitute election interference, political manipulation, or disinformation.</li><li>Using output in any context that implies the real person endorses a product, service, or viewpoint without their explicit authorisation.</li></ul>
+      </div>
+    </section>
+    <section id="your-responsibility">
+      <div class="n">07</div>
+      <div>
+        <h2>Your Responsibility</h2>
+        <p>You are solely responsible for:</p>
+        <ul><li>Obtaining and maintaining valid consent before uploading any third-party face.</li><li>Storing proof of consent and making it available if we request it.</li><li>Ensuring that your use of output complies with applicable laws in your jurisdiction, including but not limited to laws on deepfakes, privacy, defamation, and AI-generated content disclosure.</li><li>Immediately removing any content and ceasing use of a person's likeness if they withdraw consent.</li></ul>
+        <p>RealFaceAI is not liable for any harm resulting from your failure to obtain or maintain consent.</p>
+      </div>
+    </section>
+    <section id="enforcement">
+      <div class="n">08</div>
+      <div>
+        <h2>Enforcement</h2>
+        <p>We take consent violations seriously. Upon a credible report or our own detection of a violation, we will:</p>
+        <ul><li>Immediately suspend the account pending investigation.</li><li>Permanently terminate the account if the violation is confirmed.</li><li>Forfeit any unused credits associated with the account — no refund will be issued.</li><li>Report the violation to relevant law enforcement authorities where required by law or where serious harm has occurred.</li></ul>
+        <p>We reserve the right to act on violations without prior notice.</p>
+      </div>
+    </section>
+    <section id="report">
+      <div class="n">09</div>
+      <div>
+        <h2>How to Report a Violation</h2>
+        <div class="report">
+          <p>If you believe your likeness has been used without your consent on RealFaceAI, or you have witnessed a consent violation by another user, contact us immediately. Include as much detail as possible: screenshots, links, usernames and a description of the violation.</p>
+          <a href="mailto:support@realfaceai.app?subject=Consent%20violation%20report" class="btn btn--white btn--sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6l8.5 7 8.5-7"/></svg>
+            Report a violation
+          </a>
+        </div>
+      </div>
+    </section>
+    <section id="changes-to-this-policy">
+      <div class="n">10</div>
+      <div>
+        <h2>Changes to This Policy</h2>
+        <p>We may update this Consent Policy as the law and our platform evolve. Material changes will be communicated via email or an in-app notice. Continued use of RealFaceAI after changes constitutes acceptance of the updated policy.</p>
+      </div>
+    </section>
+    <section id="contact">
+      <div class="n">11</div>
+      <div>
+        <h2>Contact</h2>
+        <p>For questions about this Consent Policy: <a href="mailto:support@realfaceai.app">support@realfaceai.app</a></p>
+      </div>
+    </section>
+{% endblock %}

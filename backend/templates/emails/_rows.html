@@ -1,0 +1,9 @@
+{# Key/value detail table. Expects `rows`: a list of (label, value, style) tuples where style is "", "mono" or "accent". #}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ECEDF2;margin:0 0 28px;">
+  {% for label, value, style in rows %}
+  <tr>
+    <td style="padding:12px 12px 12px 0;border-bottom:1px solid #ECEDF2;font-size:13px;color:#6B7080;width:38%;vertical-align:top;">{{ label }}</td>
+    <td style="padding:12px 0;border-bottom:1px solid #ECEDF2;font-size:{% if style == 'mono' %}12.5px{% else %}14px{% endif %};color:{% if style == 'accent' %}#3A3DFF{% else %}#0F1117{% endif %};{% if style == 'accent' %}font-weight:600;{% endif %}{% if style == 'mono' %}font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;word-break:break-all;{% endif %}vertical-align:top;">{{ value|default:"—" }}</td>
+  </tr>
+  {% endfor %}
+</table>

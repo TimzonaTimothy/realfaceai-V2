@@ -1,0 +1,229 @@
+PODS:
+  - agora_rtc_engine (6.6.4):
+    - AgoraIrisRTC_iOS (= 4.6.4-build.4)
+    - AgoraRtcEngine_iOS (= 4.6.4)
+    - Flutter
+  - AgoraInfra_iOS (1.3.5)
+  - AgoraIrisRTC_iOS (4.6.4-build.4)
+  - AgoraRtcEngine_iOS (4.6.4):
+    - AgoraRtcEngine_iOS/AIAEC (= 4.6.4)
+    - AgoraRtcEngine_iOS/AIAECLL (= 4.6.4)
+    - AgoraRtcEngine_iOS/AINS (= 4.6.4)
+    - AgoraRtcEngine_iOS/AINSLL (= 4.6.4)
+    - AgoraRtcEngine_iOS/AudioBeauty (= 4.6.4)
+    - AgoraRtcEngine_iOS/ClearVision (= 4.6.4)
+    - AgoraRtcEngine_iOS/ContentInspect (= 4.6.4)
+    - AgoraRtcEngine_iOS/FaceCapture (= 4.6.4)
+    - AgoraRtcEngine_iOS/FaceDetection (= 4.6.4)
+    - AgoraRtcEngine_iOS/LipSync (= 4.6.4)
+    - AgoraRtcEngine_iOS/ReplayKit (= 4.6.4)
+    - AgoraRtcEngine_iOS/RtcBasic (= 4.6.4)
+    - AgoraRtcEngine_iOS/SpatialAudio (= 4.6.4)
+    - AgoraRtcEngine_iOS/VideoAv1CodecEnc (= 4.6.4)
+    - AgoraRtcEngine_iOS/VideoCodecEnc (= 4.6.4)
+    - AgoraRtcEngine_iOS/VirtualBackground (= 4.6.4)
+    - AgoraRtcEngine_iOS/VQA (= 4.6.4)
+  - AgoraRtcEngine_iOS/AIAEC (4.6.4)
+  - AgoraRtcEngine_iOS/AIAECLL (4.6.4)
+  - AgoraRtcEngine_iOS/AINS (4.6.4)
+  - AgoraRtcEngine_iOS/AINSLL (4.6.4)
+  - AgoraRtcEngine_iOS/AudioBeauty (4.6.4)
+  - AgoraRtcEngine_iOS/ClearVision (4.6.4)
+  - AgoraRtcEngine_iOS/ContentInspect (4.6.4)
+  - AgoraRtcEngine_iOS/FaceCapture (4.6.4)
+  - AgoraRtcEngine_iOS/FaceDetection (4.6.4)
+  - AgoraRtcEngine_iOS/LipSync (4.6.4)
+  - AgoraRtcEngine_iOS/ReplayKit (4.6.4)
+  - AgoraRtcEngine_iOS/RtcBasic (4.6.4):
+    - AgoraInfra_iOS (= 1.3.5)
+  - AgoraRtcEngine_iOS/SpatialAudio (4.6.4)
+  - AgoraRtcEngine_iOS/VideoAv1CodecEnc (4.6.4)
+  - AgoraRtcEngine_iOS/VideoCodecEnc (4.6.4)
+  - AgoraRtcEngine_iOS/VirtualBackground (4.6.4)
+  - AgoraRtcEngine_iOS/VQA (4.6.4)
+  - camera_avfoundation (0.0.1):
+    - Flutter
+  - device_info_plus (0.0.1):
+    - Flutter
+  - DKImagePickerController/Core (4.3.9):
+    - DKImagePickerController/ImageDataManager
+    - DKImagePickerController/Resource
+  - DKImagePickerController/ImageDataManager (4.3.9)
+  - DKImagePickerController/PhotoGallery (4.3.9):
+    - DKImagePickerController/Core
+    - DKPhotoGallery
+  - DKImagePickerController/Resource (4.3.9)
+  - DKPhotoGallery (0.0.19):
+    - DKPhotoGallery/Core (= 0.0.19)
+    - DKPhotoGallery/Model (= 0.0.19)
+    - DKPhotoGallery/Preview (= 0.0.19)
+    - DKPhotoGallery/Resource (= 0.0.19)
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Core (0.0.19):
+    - DKPhotoGallery/Model
+    - DKPhotoGallery/Preview
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Model (0.0.19):
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Preview (0.0.19):
+    - DKPhotoGallery/Model
+    - DKPhotoGallery/Resource
+    - SDWebImage
+    - SwiftyGif
+  - DKPhotoGallery/Resource (0.0.19):
+    - SDWebImage
+    - SwiftyGif
+  - file_picker (0.0.1):
+    - DKImagePickerController/PhotoGallery
+    - Flutter
+  - Flutter (1.0.0)
+  - flutter_inappwebview_ios (0.0.1):
+    - Flutter
+    - flutter_inappwebview_ios/Core (= 0.0.1)
+    - OrderedSet (~> 6.0.3)
+  - flutter_inappwebview_ios/Core (0.0.1):
+    - Flutter
+    - OrderedSet (~> 6.0.3)
+  - fluttertoast (0.0.2):
+    - Flutter
+  - image_picker_ios (0.0.1):
+    - Flutter
+  - iris_method_channel (0.0.1):
+    - Flutter
+  - open_filex (0.0.2):
+    - Flutter
+  - OrderedSet (6.0.3)
+  - package_info_plus (0.4.5):
+    - Flutter
+  - path_provider_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - permission_handler_apple (9.4.8):
+    - Flutter
+  - QCloudCore/WithoutMTA (6.5.5)
+  - QCloudCOSXML/Slim (6.5.5):
+    - QCloudCore/WithoutMTA (= 6.5.5)
+  - SDWebImage (5.21.7):
+    - SDWebImage/Core (= 5.21.7)
+  - SDWebImage/Core (5.21.7)
+  - shared_preferences_foundation (0.0.1):
+    - Flutter
+    - FlutterMacOS
+  - SwiftyGif (5.4.5)
+  - tencentcloud_cos_sdk_plugin_nobeacon (1.4.0):
+    - Flutter
+    - QCloudCOSXML/Slim (= 6.5.5)
+  - url_launcher_ios (0.0.1):
+    - Flutter
+  - webview_flutter_wkwebview (0.0.1):
+    - Flutter
+  - xmax_sdk (1.1.0):
+    - Flutter
+
+DEPENDENCIES:
+  - agora_rtc_engine (from `.symlinks/plugins/agora_rtc_engine/ios`)
+  - camera_avfoundation (from `.symlinks/plugins/camera_avfoundation/ios`)
+  - device_info_plus (from `.symlinks/plugins/device_info_plus/ios`)
+  - file_picker (from `.symlinks/plugins/file_picker/ios`)
+  - Flutter (from `Flutter`)
+  - flutter_inappwebview_ios (from `.symlinks/plugins/flutter_inappwebview_ios/ios`)
+  - fluttertoast (from `.symlinks/plugins/fluttertoast/ios`)
+  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
+  - iris_method_channel (from `.symlinks/plugins/iris_method_channel/ios`)
+  - open_filex (from `.symlinks/plugins/open_filex/ios`)
+  - package_info_plus (from `.symlinks/plugins/package_info_plus/ios`)
+  - path_provider_foundation (from `.symlinks/plugins/path_provider_foundation/darwin`)
+  - permission_handler_apple (from `.symlinks/plugins/permission_handler_apple/ios`)
+  - shared_preferences_foundation (from `.symlinks/plugins/shared_preferences_foundation/darwin`)
+  - tencentcloud_cos_sdk_plugin_nobeacon (from `.symlinks/plugins/tencentcloud_cos_sdk_plugin_nobeacon/ios`)
+  - url_launcher_ios (from `.symlinks/plugins/url_launcher_ios/ios`)
+  - webview_flutter_wkwebview (from `.symlinks/plugins/webview_flutter_wkwebview/ios`)
+  - xmax_sdk (from `.symlinks/plugins/xmax_sdk/ios`)
+
+SPEC REPOS:
+  trunk:
+    - AgoraInfra_iOS
+    - AgoraIrisRTC_iOS
+    - AgoraRtcEngine_iOS
+    - DKImagePickerController
+    - DKPhotoGallery
+    - OrderedSet
+    - QCloudCore
+    - QCloudCOSXML
+    - SDWebImage
+    - SwiftyGif
+
+EXTERNAL SOURCES:
+  agora_rtc_engine:
+    :path: ".symlinks/plugins/agora_rtc_engine/ios"
+  camera_avfoundation:
+    :path: ".symlinks/plugins/camera_avfoundation/ios"
+  device_info_plus:
+    :path: ".symlinks/plugins/device_info_plus/ios"
+  file_picker:
+    :path: ".symlinks/plugins/file_picker/ios"
+  Flutter:
+    :path: Flutter
+  flutter_inappwebview_ios:
+    :path: ".symlinks/plugins/flutter_inappwebview_ios/ios"
+  fluttertoast:
+    :path: ".symlinks/plugins/fluttertoast/ios"
+  image_picker_ios:
+    :path: ".symlinks/plugins/image_picker_ios/ios"
+  iris_method_channel:
+    :path: ".symlinks/plugins/iris_method_channel/ios"
+  open_filex:
+    :path: ".symlinks/plugins/open_filex/ios"
+  package_info_plus:
+    :path: ".symlinks/plugins/package_info_plus/ios"
+  path_provider_foundation:
+    :path: ".symlinks/plugins/path_provider_foundation/darwin"
+  permission_handler_apple:
+    :path: ".symlinks/plugins/permission_handler_apple/ios"
+  shared_preferences_foundation:
+    :path: ".symlinks/plugins/shared_preferences_foundation/darwin"
+  tencentcloud_cos_sdk_plugin_nobeacon:
+    :path: ".symlinks/plugins/tencentcloud_cos_sdk_plugin_nobeacon/ios"
+  url_launcher_ios:
+    :path: ".symlinks/plugins/url_launcher_ios/ios"
+  webview_flutter_wkwebview:
+    :path: ".symlinks/plugins/webview_flutter_wkwebview/ios"
+  xmax_sdk:
+    :path: ".symlinks/plugins/xmax_sdk/ios"
+
+SPEC CHECKSUMS:
+  agora_rtc_engine: 2c4d8824b042f37d58cc334d5128cd87bc8915f5
+  AgoraInfra_iOS: 0bf927aad4fc425b24ca5d094b333361960f5cb0
+  AgoraIrisRTC_iOS: 62c1cec878320d75ee2c5ebb43f0e72659a2bbf3
+  AgoraRtcEngine_iOS: 2ac3c06dd68eff8e895b5529e59a10a05da63878
+  camera_avfoundation: be3be85408cd4126f250386828e9b1dfa40ab436
+  device_info_plus: 21fcca2080fbcd348be798aa36c3e5ed849eefbe
+  DKImagePickerController: 946cec48c7873164274ecc4624d19e3da4c1ef3c
+  DKPhotoGallery: b3834fecb755ee09a593d7c9e389d8b5d6deed60
+  file_picker: a0560bc09d61de87f12d246fc47d2119e6ef37be
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  flutter_inappwebview_ios: b89ba3482b96fb25e00c967aae065701b66e9b99
+  fluttertoast: 2c67e14dce98bbdb200df9e1acf610d7a6264ea1
+  image_picker_ios: 7fe1ff8e34c1790d6fff70a32484959f563a928a
+  iris_method_channel: 7d661cf3259b3009ae423508470dbeb9374446ee
+  open_filex: 432f3cd11432da3e39f47fcc0df2b1603854eff1
+  OrderedSet: e539b66b644ff081c73a262d24ad552a69be3a94
+  package_info_plus: af8e2ca6888548050f16fa2f1938db7b5a5df499
+  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
+  permission_handler_apple: 92d754bbaa7361d436db2d6c3c1c2a0fdcec462e
+  QCloudCore: cbdf50b7cee5dd515b0467f55361ac8af36349cd
+  QCloudCOSXML: 89406febd7844d84a778d3d2f71b2f39e4167ae1
+  SDWebImage: e9fc87c1aab89a8ab1bbd74eba378c6f53be8abf
+  shared_preferences_foundation: 9e1978ff2562383bd5676f64ec4e9aa8fa06a6f7
+  SwiftyGif: 706c60cf65fa2bc5ee0313beece843c8eb8194d4
+  tencentcloud_cos_sdk_plugin_nobeacon: 632c0b36b75c6297fa3e8cc1d90babad4ea25e10
+  url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
+  webview_flutter_wkwebview: 6e6160e04b1e85872253adc5322afe416d9cdddc
+  xmax_sdk: 0fca18ad0afe23a562bd5d8fe1fb9bbfa9020e48
+
+PODFILE CHECKSUM: 47dacf377a0de80cc13a348a19d45d1d2d82690c
+
+COCOAPODS: 1.16.2

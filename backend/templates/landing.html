@@ -1,0 +1,403 @@
+{% extends "site/base.html" %}
+{% load static humanize %}
+
+{% block title %}RealFaceAI — Real-Time AI Face Swap for Zoom, Meet, Teams &amp; OBS{% endblock %}
+{% block description %}RealFaceAI is a desktop app for real-time AI face swap on live video calls and streams. Works with Zoom, Google Meet, Teams, Discord and OBS. Runs locally on Mac and Windows — no cloud uploads.{% endblock %}
+{% block tw_description %}Real-time AI face swap for Zoom, Meet, Teams, Discord and OBS. Runs locally on Mac and Windows.{% endblock %}
+{% block canonical %}https://realfaceai.app/{% endblock %}
+
+{% block jsonld %}
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+  {"@type":"SoftwareApplication","@id":"https://realfaceai.app/#app","name":"RealFaceAI","applicationCategory":"MultimediaApplication","applicationSubCategory":"Real-time face swap","operatingSystem":"macOS 13+, Windows 10, Windows 11","description":"Desktop app that swaps your face onto any consented character in real time during live video calls and streams. Processing runs locally; video frames are not uploaded.","url":"https://realfaceai.app/","downloadUrl":"https://realfaceai.app/download/","screenshot":"https://realfaceai.app/static/images/app/dashboard.webp","publisher":{"@id":"https://realfaceai.app/#org"},"featureList":["Real-time face swap on live video","Works with Zoom, Google Meet, Microsoft Teams, Discord, Slack Huddles, OBS and browsers","Runs on-device, no cloud uploads","Pay-as-you-go credits that never expire"],
+   "offers":{"@type":"AggregateOffer","priceCurrency":"USD","lowPrice":"0","offerCount":"{{ credit_packs|length|add:1 }}"}},
+  {"@type":"FAQPage","mainEntity":[
+    {"@type":"Question","name":"Does my video leave my computer?","acceptedAnswer":{"@type":"Answer","text":"No. The swap runs on your own hardware and frames are not uploaded."}},
+    {"@type":"Question","name":"How are credits counted?","acceptedAnswer":{"@type":"Answer","text":"One credit is roughly one second of live streaming, and you are only charged while a stream is live. Credits never expire."}},
+    {"@type":"Question","name":"Can I use RealFaceAI on more than one device?","acceptedAnswer":{"@type":"Answer","text":"Yes. Every plan works on multiple devices. Install the app on each Mac or Windows PC and sign in with the same account; they all share one credit balance."}},
+    {"@type":"Question","name":"Which apps does RealFaceAI work with?","acceptedAnswer":{"@type":"Answer","text":"Anything that can pick a camera: Zoom, Google Meet, Microsoft Teams, Discord, Slack Huddles, OBS and browsers."}},
+    {"@type":"Question","name":"Whose face can I use?","acceptedAnswer":{"@type":"Answer","text":"Your own, a fictional character, or a real person who has given you explicit consent. Minors are never allowed."}},
+    {"@type":"Question","name":"What do I need to run RealFaceAI?","acceptedAnswer":{"@type":"Answer","text":"macOS 13 or later on Apple Silicon or Intel, or 64-bit Windows 10/11 with a DirectX 12 GPU, plus 8 GB of RAM."}}
+  ]}
+]}
+</script>
+{% endblock %}
+
+{% block nav %}{% include "site/_nav.html" with dark=True %}{% endblock %}
+
+{% block content %}
+
+<!-- ============ HERO ============ -->
+<section class="hero dark" data-screen-label="01 Hero">
+  <div class="wrap">
+    <div class="hero__grid">
+      <div class="hero__copy" data-reveal="stagger">
+        <span class="label"><span class="idx">v1.4</span><span class="tick"></span>Real-time face swap for live calls</span>
+        <h1 class="display">Be anyone<br />on the call.</h1>
+        <p class="lead">Upload a portrait. Join your meeting. RealFaceAI swaps your face onto any character in real time, running locally on your desktop. No cloud uploads, no lag.</p>
+        <div class="hero__cta">
+          <a href="/download/file/?platform=mac" class="btn btn--white btn--lg">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+            Download for Mac
+          </a>
+          <a href="/download/file/?platform=windows" class="btn btn--line btn--lg">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.5l7.5-1.05V12H3V5.5zm0 7.5h7.5v7.55L3 19.5V13zm8.5-9.2L21 2.5V12h-9.5V3.8zm0 9.2H21v9.5l-9.5-1.3V13z"/></svg>
+            Download for Windows
+          </a>
+        </div>
+        <div class="hero__meta">
+          <span>macOS 13+</span><span>Windows 10 / 11</span><span>Free to try</span><span>No credit card</span>
+        </div>
+      </div>
+
+      <div class="hero__stage" data-reveal>
+        <div class="monitor" role="img" aria-label="Abstract animation: a face rendered half solid, half dissolving into pixel columns">
+          <canvas data-pixel-face></canvas>
+          <i class="monitor__corner tl"></i><i class="monitor__corner tr"></i>
+          <i class="monitor__corner bl"></i><i class="monitor__corner br"></i>
+          <div class="monitor__hud tl"><span>CAM 01</span><span><b>1080p</b></span><span><b>42</b> fps</span></div>
+          <div class="monitor__hud tr"><span class="live"><b>Live</b></span></div>
+          <div class="monitor__hud bl"><span>Latency <b data-latency>38</b> ms</span></div>
+          <div class="monitor__hud br"><span><b data-timecode>00:00:00:00</b></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="compat">
+    <div class="wrap compat__in">
+      <span class="label">Works with</span>
+      <div class="compat__list">
+        <span>Zoom</span><span>Google Meet</span><span>Microsoft Teams</span><span>Discord</span><span>Slack Huddles</span><span>OBS</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="metrics" data-reveal="stagger">
+      <div class="metric"><div class="metric__v">&lt;50<small>ms</small></div><div class="metric__k">Glass-to-glass latency on your own GPU.</div></div>
+      <div class="metric"><div class="metric__v">478</div><div class="metric__k">Facial landmarks tracked every frame.</div></div>
+      <div class="metric"><div class="metric__v">42<small>fps</small></div><div class="metric__k">At 1080p on a 2021 MacBook.</div></div>
+      <div class="metric"><div class="metric__v">0</div><div class="metric__k">Frames uploaded. Everything stays on-device.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="section" id="how" data-screen-label="02 How it works">
+  <div class="wrap">
+    <div class="shead" data-reveal>
+      <div class="shead__l">
+        <span class="label"><span class="idx">01</span><span class="tick"></span>How it works</span>
+        <h2 class="h2">Three steps.<br /><span class="strike-soft">Zero awkward.</span></h2>
+      </div>
+      <p class="shead__r">Setup takes under a minute. After that, every call is a new you.</p>
+    </div>
+
+    <div class="steps" data-reveal="stagger">
+      <article class="step">
+        <div class="step__art">
+          <svg viewBox="0 0 240 180" fill="none" aria-hidden="true">
+            <rect x="62" y="34" width="92" height="116" rx="10" transform="rotate(-8 108 92)" stroke="#0F1117" stroke-opacity=".18" stroke-width="1.25" fill="#fff"/>
+            <rect x="80" y="30" width="92" height="116" rx="10" transform="rotate(5 126 88)" stroke="#0F1117" stroke-opacity=".25" stroke-width="1.25" fill="#fff"/>
+            <rect x="74" y="36" width="92" height="116" rx="10" fill="#0F1117"/>
+            <path d="M118 70 A24 24 0 0 0 118 118 Z" fill="#fff"/>
+            <rect x="121" y="70" width="7" height="7" rx="1.6" fill="#fff"/><rect x="121" y="79.5" width="7" height="7" rx="1.6" fill="#fff"/><rect x="121" y="89" width="7" height="7" rx="1.6" fill="#fff"/><rect x="121" y="98.5" width="7" height="7" rx="1.6" fill="#fff"/><rect x="121" y="108" width="7" height="7" rx="1.6" fill="#fff"/>
+            <rect x="131" y="80" width="5.5" height="5.5" rx="1.3" fill="#fff" fill-opacity=".75"/><rect x="131" y="89.5" width="5.5" height="5.5" rx="1.3" fill="#fff" fill-opacity=".75"/><rect x="131" y="99" width="5.5" height="5.5" rx="1.3" fill="#fff" fill-opacity=".75"/>
+            <rect x="139.5" y="90.5" width="4" height="4" rx="1" fill="#fff" fill-opacity=".45"/>
+            <text x="86" y="140" font-family="JetBrains Mono, monospace" font-size="8" fill="#fff" fill-opacity=".55" letter-spacing=".5">PORTRAIT.JPG</text>
+            <rect x="152" y="24" width="28" height="28" rx="8" fill="#3A3DFF"/>
+            <path d="M166 31v14M159 38h14" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="step__n"><span class="label"><span class="idx">01</span><span class="tick"></span>Upload</span></div>
+        <h3>Drop in a character</h3>
+        <p>A photo, a painting, an illustration. Anything with a face works. Build a library of up to 200 personas.</p>
+      </article>
+
+      <article class="step">
+        <div class="step__art">
+          <svg viewBox="0 0 240 180" fill="none" aria-hidden="true">
+            <path d="M120 14v14M120 156v14M50 92h14M176 92h14" stroke="#0F1117" stroke-opacity=".35" stroke-width="1.25" stroke-linecap="round"/>
+            <ellipse cx="120" cy="92" rx="46" ry="60" stroke="#0F1117" stroke-opacity=".22" stroke-width="1.25" stroke-dasharray="2 4"/>
+            <g fill="#3A3DFF"><circle cx="166.0" cy="92.0" r="1.5"/><circle cx="164.7" cy="106.4" r="1.5"/><circle cx="160.7" cy="119.9" r="1.5"/><circle cx="154.4" cy="131.8" r="1.5"/><circle cx="146.1" cy="141.4" r="1.5"/><circle cx="136.3" cy="148.1" r="1.5"/><circle cx="125.5" cy="151.6" r="1.5"/><circle cx="114.5" cy="151.6" r="1.5"/><circle cx="103.7" cy="148.1" r="1.5"/><circle cx="93.9" cy="141.4" r="1.5"/><circle cx="85.6" cy="131.8" r="1.5"/><circle cx="79.3" cy="119.9" r="1.5"/><circle cx="75.3" cy="106.4" r="1.5"/><circle cx="74.0" cy="92.0" r="1.5"/><circle cx="75.3" cy="77.6" r="1.5"/><circle cx="79.3" cy="64.1" r="1.5"/><circle cx="85.6" cy="52.2" r="1.5"/><circle cx="93.9" cy="42.6" r="1.5"/><circle cx="103.7" cy="35.9" r="1.5"/><circle cx="114.5" cy="32.4" r="1.5"/><circle cx="125.5" cy="32.4" r="1.5"/><circle cx="136.3" cy="35.9" r="1.5"/><circle cx="146.1" cy="42.6" r="1.5"/><circle cx="154.4" cy="52.2" r="1.5"/><circle cx="160.7" cy="64.1" r="1.5"/><circle cx="164.7" cy="77.6" r="1.5"/><circle cx="155.2" cy="106.5" r="1.5"/><circle cx="150.1" cy="120.4" r="1.5"/><circle cx="142.0" cy="131.4" r="1.5"/><circle cx="131.9" cy="138.6" r="1.5"/><circle cx="120.5" cy="141.2" r="1.5"/><circle cx="109.1" cy="139.0" r="1.5"/><circle cx="98.8" cy="132.2" r="1.5"/><circle cx="90.5" cy="121.5" r="1.5"/><circle cx="85.2" cy="107.9" r="1.5"/><circle cx="83.2" cy="92.7" r="1.5"/><circle cx="84.8" cy="77.5" r="1.5"/><circle cx="89.9" cy="63.6" r="1.5"/><circle cx="98.0" cy="52.6" r="1.5"/><circle cx="108.1" cy="45.4" r="1.5"/><circle cx="119.5" cy="42.8" r="1.5"/><circle cx="130.9" cy="45.0" r="1.5"/><circle cx="141.2" cy="51.8" r="1.5"/><circle cx="149.5" cy="62.5" r="1.5"/><circle cx="154.8" cy="76.1" r="1.5"/><circle cx="156.8" cy="91.3" r="1.5"/><circle cx="110.0" cy="82.0" r="1.5"/><circle cx="107.9" cy="84.5" r="1.5"/><circle cx="103.0" cy="85.5" r="1.5"/><circle cx="98.1" cy="84.5" r="1.5"/><circle cx="96.0" cy="82.0" r="1.5"/><circle cx="98.1" cy="79.5" r="1.5"/><circle cx="103.0" cy="78.5" r="1.5"/><circle cx="107.9" cy="79.5" r="1.5"/><circle cx="144.0" cy="82.0" r="1.5"/><circle cx="141.9" cy="84.5" r="1.5"/><circle cx="137.0" cy="85.5" r="1.5"/><circle cx="132.1" cy="84.5" r="1.5"/><circle cx="130.0" cy="82.0" r="1.5"/><circle cx="132.1" cy="79.5" r="1.5"/><circle cx="137.0" cy="78.5" r="1.5"/><circle cx="141.9" cy="79.5" r="1.5"/><circle cx="120.0" cy="96.0" r="1.5"/><circle cx="116.0" cy="104.0" r="1.5"/><circle cx="124.0" cy="104.0" r="1.5"/><circle cx="108.0" cy="120.0" r="1.5"/><circle cx="112.0" cy="120.9" r="1.5"/><circle cx="116.0" cy="121.8" r="1.5"/><circle cx="120.0" cy="122.7" r="1.5"/><circle cx="124.0" cy="121.8" r="1.5"/><circle cx="128.0" cy="120.9" r="1.5"/><circle cx="132.0" cy="120.0" r="1.5"/></g>
+            <rect x="166" y="24" width="44" height="18" rx="5" fill="#0F1117"/>
+            <text x="188" y="36" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#fff">478 pts</text>
+          </svg>
+        </div>
+        <div class="step__n"><span class="label"><span class="idx">02</span><span class="tick"></span>Calibrate</span></div>
+        <h3>Look at the camera</h3>
+        <p>A 6-second face scan maps 478 landmarks. The model locks onto your bone structure so the swap stays glued through movement.</p>
+      </article>
+
+      <article class="step">
+        <div class="step__art">
+          <svg viewBox="0 0 240 180" fill="none" aria-hidden="true">
+            <rect x="40" y="26" width="78" height="60" rx="8" fill="#3A3DFF"/>
+            <path d="M76 42 A13 13 0 0 0 76 68 Z" fill="#fff"/>
+            <rect x="78" y="42" width="4.5" height="4.5" rx="1" fill="#fff"/><rect x="78" y="48" width="4.5" height="4.5" rx="1" fill="#fff"/><rect x="78" y="54" width="4.5" height="4.5" rx="1" fill="#fff"/><rect x="78" y="60" width="4.5" height="4.5" rx="1" fill="#fff"/>
+            <rect x="85" y="48" width="3.5" height="3.5" rx=".8" fill="#fff" fill-opacity=".7"/><rect x="85" y="54" width="3.5" height="3.5" rx=".8" fill="#fff" fill-opacity=".7"/>
+            <circle cx="108" cy="36" r="3" fill="#E5322D"/>
+            <text x="48" y="80" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#fff" fill-opacity=".8">YOU</text>
+            <rect x="122" y="26" width="78" height="60" rx="8" fill="#fff" stroke="#0F1117" stroke-opacity=".14"/>
+            <circle cx="161" cy="52" r="10" stroke="#0F1117" stroke-opacity=".3" stroke-width="1.25"/>
+            <text x="130" y="80" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#0F1117" fill-opacity=".45">ALEX</text>
+            <rect x="40" y="90" width="78" height="60" rx="8" fill="#fff" stroke="#0F1117" stroke-opacity=".14"/>
+            <circle cx="79" cy="116" r="10" stroke="#0F1117" stroke-opacity=".3" stroke-width="1.25"/>
+            <text x="48" y="144" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#0F1117" fill-opacity=".45">SAM</text>
+            <rect x="122" y="90" width="78" height="60" rx="8" fill="#fff" stroke="#0F1117" stroke-opacity=".14"/>
+            <circle cx="161" cy="116" r="10" stroke="#0F1117" stroke-opacity=".3" stroke-width="1.25"/>
+            <text x="130" y="144" font-family="JetBrains Mono, monospace" font-size="7.5" fill="#0F1117" fill-opacity=".45">JO</text>
+          </svg>
+        </div>
+        <div class="step__n"><span class="label"><span class="idx">03</span><span class="tick"></span>Go live</span></div>
+        <h3>Pick your app. Go live.</h3>
+        <p>RealFaceAI registers as a virtual webcam. Open Zoom, Meet or Teams, pick &ldquo;RealFaceAI&rdquo; as your camera, and you&rsquo;re on.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRODUCT ============ -->
+<section class="section dark" id="product" data-screen-label="03 Product">
+  <div class="wrap">
+    <div class="shead" data-reveal>
+      <div class="shead__l">
+        <span class="label"><span class="idx">02</span><span class="tick"></span>The desktop app</span>
+        <h2 class="h2">Native, quiet,<br /><span class="strike-soft">built for the call.</span></h2>
+      </div>
+      <p class="shead__r">A focused workspace for setting up a face, going live and keeping an eye on your balance. No browser tabs, no buffering.</p>
+    </div>
+
+    <div class="showcase" data-showcase data-reveal>
+      <div class="tabs" role="tablist" aria-label="App screens">
+        <button role="tab" data-name="Dashboard" aria-selected="true"><span class="mono">01</span>Dashboard</button>
+        <button role="tab" data-name="Studio" aria-selected="false"><span class="mono">02</span>Studio</button>
+        <!--<button role="tab" data-name="Usage" aria-selected="false"><span class="mono">03</span>Usage</button>-->
+        <!--<button role="tab" data-name="Billing" aria-selected="false"><span class="mono">04</span>Billing</button>-->
+      </div>
+      <div class="window">
+        <div class="window__bar"><i></i><i></i><i></i><span class="mono" data-window-title>realfaceai — Dashboard</span></div>
+        <div class="window__view">
+          <picture><source srcset="{% static 'images/app/dashboard.webp' %}" type="image/webp"><img class="is-on" src="{% static 'images/app/dashboard.webp' %}" alt="RealFaceAI dashboard showing streaming time left and recent sessions" width="1440" height="900"></picture>
+          <picture><source srcset="{% static 'images/app/studio.webp' %}" type="image/webp"><img src="{% static 'images/app/studio.webp' %}" alt="RealFaceAI studio with setup, preview and pre-flight panels" width="1440" height="900" loading="lazy"></picture>
+          <!--<picture><source srcset="{% static 'images/app/usage.webp' %}" type="image/webp"><img src="{% static 'images/app/usage.webp' %}" alt="RealFaceAI usage history" width="1440" height="900" loading="lazy"></picture>-->
+          <!--<picture><source srcset="{% static 'images/app/billing.webp' %}" type="image/webp"><img src="{% static 'images/app/billing.webp' %}" alt="RealFaceAI billing and credit packs" width="1440" height="900" loading="lazy"></picture>-->
+        </div>
+      </div>
+      <div class="showcase__notes">
+        <div class="is-on"><b>Dashboard</b>Streaming time left, at a glance.</div>
+        <div><b>Studio</b>Choose a face, run pre-flight, go live.</div>
+        <div><b>Usage</b>Every session, to the second.</div>
+        <div><b>Billing</b>Top up with a credit pack. No subscription.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FEATURES ============ -->
+<section class="section" id="features" data-screen-label="04 Features">
+  <div class="wrap">
+    <div class="shead" data-reveal>
+      <div class="shead__l">
+        <span class="label"><span class="idx">03</span><span class="tick"></span>Why RealFaceAI</span>
+        <h2 class="h2">Engineered for<br /><span class="strike-soft">real-time video.</span></h2>
+      </div>
+      <p class="shead__r">Built from the ground up for low-latency video. No frame drops, no &ldquo;please wait while we render&rdquo;.</p>
+    </div>
+
+    <div class="features" data-reveal="stagger">
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"/></svg></div><span class="label">F.01</span></div>
+        <h4>Sub-50ms latency</h4>
+        <p>ONNX-accelerated models run on your GPU. 28&ndash;42 FPS at 1080p on a 2021 MacBook.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg></div><span class="label">F.02</span></div>
+        <h4>100% on-device</h4>
+        <p>Nothing leaves your machine. No frames uploaded, no telemetry, no training on your face.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M21 8l-5 4 5 4V8z"/></svg></div><span class="label">F.03</span></div>
+        <h4>Virtual webcam</h4>
+        <p>Works wherever your real camera works. Zoom, Meet, Teams, Discord, OBS, browsers.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg></div><span class="label">F.04</span></div>
+        <h4>478-point tracking</h4>
+        <p>Landmark tracking plus a custom diffusion head keeps the swap locked through head turns, glasses and hair.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3l8 4v6c0 5-3.5 7.5-8 8-4.5-.5-8-3-8-8V7l8-4z"/></svg></div><span class="label">F.05</span></div>
+        <h4>Identity guard</h4>
+        <p>Watermarked output and consent capture. A face library only you control, encrypted at rest.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><span class="label">F.06</span></div>
+        <h4>Record &amp; export</h4>
+        <p>Save sessions in 4K. Bake the swap in, or export raw and overlay tracks for post.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div><span class="label">F.07</span></div>
+        <h4>Voice-sync mouth</h4>
+        <p>Optional audio-driven lip-sync keeps mouth shapes matched to what you&rsquo;re actually saying.</p>
+      </div>
+      <div class="feat">
+        <div class="feat__top"><div class="feat__ic"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></div><span class="label">F.08</span></div>
+        <h4>Live light match</h4>
+        <p>The swap reads your room&rsquo;s lighting frame by frame, so the character never looks pasted on.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRICING ============ -->
+<section class="section tint" id="pricing" data-screen-label="05 Pricing">
+  <div class="wrap">
+    <div class="shead" data-reveal>
+      <div class="shead__l">
+        <span class="label"><span class="idx">04</span><span class="tick"></span>Credits, not subscriptions</span>
+        <h2 class="h2">Pay for what<br /><span class="strike-soft">you actually use.</span></h2>
+      </div>
+      <p class="shead__r">One credit is about one second of live streaming. Buy a pack, use it when you need it. Credits never expire.</p>
+    </div>
+
+    <div class="plans" style="--n: {{ credit_packs|length }}" data-reveal="stagger">
+      {% for pack in credit_packs %}
+      <div class="plan{% if pack.popular %} plan--hot{% endif %}">
+        <div class="plan__top">
+          <span class="label">0{{ forloop.counter }} / {{ pack.label|upper }}</span>
+          {% if pack.popular %}<span class="badge">Best value</span>{% endif %}
+        </div>
+        <div class="plan__name">{{ pack.label }}</div>
+        <div class="plan__price"><span class="cur">$</span><span class="amt">{{ pack.price_usd|floatformat:"0" }}</span></div>
+        <div class="plan__credits">{{ pack.credits|intcomma }} credits</div>
+        <ul>
+          <li>~{{ pack.sessions }} sessions</li>
+          <li>~{{ pack.streaming_minutes }} minutes streaming</li>
+          <li>Use on multiple devices</li>
+          {% if pack.popular %}
+          <li>Most picked pack</li>
+          <li>All features included</li>
+          {% else %}
+          <li>All characters</li>
+          <li>{% if forloop.counter >= 4 %}Dedicated support{% elif forloop.counter >= 2 %}Priority support{% else %}Email support{% endif %}</li>
+          {% endif %}
+        </ul>
+        <a href="/download/" class="btn btn--block {% if pack.popular %}btn--primary{% else %}btn--line{% endif %} buy" data-pack-id="{{ pack.id }}">Get {{ pack.label }}</a>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="pricing__foot">
+      <span>Buy in the app after you sign in</span><span>USDT / USDC on BSC and Solana</span><span>Multiple devices on every plan</span><span>Credits never expire</span>
+    </div>
+
+    <!-- ============ CREDIT CALCULATOR ============ -->
+    <div id="calculator" style="margin-top:clamp(72px,9vw,120px)">
+      <div class="shead" style="margin-bottom:32px" data-reveal>
+        <div class="shead__l">
+          <span class="label"><span class="idx">05</span><span class="tick"></span>Estimate your usage</span>
+          <h2 class="h3" style="margin-top:18px;font-size:clamp(26px,2.6vw,36px)">How many credits do I need?</h2>
+        </div>
+        <p class="shead__r">Move the slider and pick a session length to see which pack fits.</p>
+      </div>
+
+      <div class="calc" data-reveal>
+        <div class="calc__col">
+          <label class="label" for="sessionsSlider">Sessions per month</label>
+          <div class="calc__big"><span id="sessionsVal">50</span><small>sessions</small></div>
+          <div>
+            <input type="range" id="sessionsSlider" class="range" min="1" max="1000" value="50" step="1" />
+            <div class="range__scale"><span>1</span><span>250</span><span>500</span><span>750</span><span>1,000</span></div>
+          </div>
+        </div>
+        <div class="calc__col">
+          <span class="label">Average session length</span>
+          <div class="seg" id="durationBtns" role="group" aria-label="Average session length">
+            <button type="button" class="dur-btn active" data-secs="30" aria-pressed="true">30s</button>
+            <button type="button" class="dur-btn" data-secs="60" aria-pressed="false">1m</button>
+            <button type="button" class="dur-btn" data-secs="120" aria-pressed="false">2m</button>
+            <button type="button" class="dur-btn" data-secs="300" aria-pressed="false">5m</button>
+            <button type="button" class="dur-btn" data-secs="600" aria-pressed="false">10m</button>
+          </div>
+          <span class="label" style="margin-top:8px">Credits needed</span>
+          <div class="calc__big"><span id="creditsNeeded">1,500</span><small>credits</small></div>
+          <div class="calc__sub">&asymp; <span id="costPerMonth">$25 <span class="cost-arrow">&rarr;</span> 1,000 credits</span></div>
+        </div>
+        <div class="calc__col" id="calcRec">
+          <span class="label"><span class="idx">&#9679;</span>Recommended</span>
+          <div class="calc__rec">
+            <div class="calc__rec-name" id="recName">Elite</div>
+            <div class="calc__rec-detail" id="recDetail">1,000 credits · $25 · covers ~20 sessions</div>
+          </div>
+          <a href="/download/" class="btn btn--ink btn--block" id="recBtn">Get Elite</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FAQ ============ -->
+<section class="section" id="faq" data-screen-label="06 FAQ">
+  <div class="wrap faq">
+    <div class="faq__head" data-reveal>
+      <span class="label"><span class="idx">06</span><span class="tick"></span>Questions</span>
+      <h2 class="h2" style="margin-top:22px">Good to know.</h2>
+      <p class="muted" style="margin-top:20px;max-width:22em">Anything else? Write to <a href="mailto:support@realfaceai.app" class="accent">support@realfaceai.app</a>.</p>
+    </div>
+    <div class="faq__list" data-reveal>
+      <details open>
+        <summary>Does my video leave my computer?<i></i></summary>
+        <p>No. The swap runs on your own hardware and frames are not uploaded. See the <a href="/privacy/">Privacy Policy</a> for exactly what account data we keep.</p>
+      </details>
+      <details>
+        <summary>How are credits counted?<i></i></summary>
+        <p>One credit is roughly one second of live streaming, and you&rsquo;re only charged while a stream is live. Credits never expire.</p>
+      </details>
+      <details>
+        <summary>Can I use it on more than one device?<i></i></summary>
+        <p>Yes. Every plan works on multiple devices. Install the app on each Mac or Windows PC and sign in with the same account &mdash; they all share one credit balance.</p>
+      </details>
+      <details>
+        <summary>Which apps does it work with?<i></i></summary>
+        <p>Anything that can pick a camera: Zoom, Google Meet, Microsoft Teams, Discord, Slack Huddles, OBS and browsers.</p>
+      </details>
+      <details>
+        <summary>Whose face can I use?<i></i></summary>
+        <p>Your own, a fictional character, or a real person who has given you explicit consent. Minors are never allowed. The <a href="/consent/">Consent Policy</a> has the full rules.</p>
+      </details>
+      <details>
+        <summary>What do I need to run it?<i></i></summary>
+        <p>macOS 13 or later on Apple Silicon or Intel, or 64-bit Windows 10/11 with a DirectX 12 GPU, plus 8&nbsp;GB of RAM. Full details are on the <a href="/download/">download page</a>.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA ============ -->
+<section class="section dark cta" id="download" data-screen-label="07 CTA">
+  <div class="wrap cta__in">
+    <div class="cta__copy" data-reveal="stagger">
+      <span class="label"><span class="idx">&#9679;</span>Ready when you are</span>
+      <h2 class="h1">Your next call<br />could be anyone.</h2>
+      <p class="lead">Free to try, no credit card. Install the app, scan your face, and join a meeting as someone unexpected.</p>
+      <div class="hero__cta">
+        <a href="/download/file/?platform=mac" class="btn btn--white btn--lg">Download for Mac</a>
+        <a href="/download/file/?platform=windows" class="btn btn--line btn--lg">Download for Windows</a>
+      </div>
+    </div>
+    <div class="cta__art" data-reveal aria-hidden="true">
+      <svg viewBox="0 0 84 60" style="color:#fff"><use href="#rf-glyph"/></svg>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block footer %}{% include "site/_footer.html" %}{% endblock %}
+
+{% block data %}
+{% comment %}Credit pack data for the calculator, escaped by Django.{% endcomment %}
+<script id="credit-packs-data" type="application/json">
+  [{% for pack in credit_packs %}{"id":"{{ pack.id|escapejs }}","label":"{{ pack.label|escapejs }}","credits":{{ pack.credits }},"price":{{ pack.price_usd }},"sessions":{{ pack.sessions }},"minutes":{{ pack.streaming_minutes }}}{% if not forloop.last %},{% endif %}{% endfor %}]
+</script>
+{% endblock %}

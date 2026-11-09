@@ -1,0 +1,16 @@
+{% extends "emails/base.html" %}
+{% block subject %}Your order is confirmed{% endblock %}
+{% block preheader %}Your {{ product }} order is confirmed.{% endblock %}
+{% block kicker %}Order confirmed{% endblock %}
+{% block content %}
+<p style="margin:0 0 10px;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#12A150;">&#9679;&nbsp; Confirmed</p>
+<h1 class="rf-h1" style="margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;color:#0F1117;">Thanks, your order is confirmed</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#3D414D;">Here are the details of your purchase.</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #ECEDF2;margin:0 0 28px;">
+  <tr><td style="padding:12px 12px 12px 0;border-bottom:1px solid #ECEDF2;font-size:13px;color:#6B7080;width:38%;">Product</td><td style="padding:12px 0;border-bottom:1px solid #ECEDF2;font-size:14px;color:#0F1117;">{{ product }}</td></tr>
+  <tr><td style="padding:12px 12px 12px 0;border-bottom:1px solid #ECEDF2;font-size:13px;color:#6B7080;">Amount</td><td style="padding:12px 0;border-bottom:1px solid #ECEDF2;font-size:14px;color:#3A3DFF;font-weight:600;">${{ amount }}</td></tr>
+  <tr><td style="padding:12px 12px 12px 0;border-bottom:1px solid #ECEDF2;font-size:13px;color:#6B7080;">Date</td><td style="padding:12px 0;border-bottom:1px solid #ECEDF2;font-size:14px;color:#0F1117;">{{ date|date:"M j, Y" }}</td></tr>
+  {% if password %}<tr><td style="padding:12px 12px 12px 0;border-bottom:1px solid #ECEDF2;font-size:13px;color:#6B7080;">Password</td><td style="padding:12px 0;border-bottom:1px solid #ECEDF2;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;color:#0F1117;">{{ password }}</td></tr>{% endif %}
+</table>
+{% if download_link %}{% include "emails/_button.html" with href=download_link label="Download" %}{% endif %}
+{% endblock %}

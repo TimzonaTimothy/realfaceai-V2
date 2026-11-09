@@ -1,0 +1,11 @@
+{% extends "emails/base.html" %}
+{% block subject %}Payment confirmed: {{ payment.pack_label }}{% endblock %}
+{% block preheader %}{{ payment.user.email }} was credited {{ credits }} credits.{% endblock %}
+{% block kicker %}Payment confirmed{% endblock %}
+{% block content %}
+<p style="margin:0 0 10px;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#12A150;">&#9679;&nbsp; Credited</p>
+<h1 class="rf-h1" style="margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;color:#0F1117;">Payment confirmed</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#3D414D;">The payment was confirmed and the credits were added to the user&rsquo;s balance.</p>
+{% include "emails/_rows.html" %}
+{% endblock %}
+{% block footer_note %}Internal notification for RealFaceAI admins.{% endblock %}

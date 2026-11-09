@@ -1,0 +1,12 @@
+{% extends "emails/base.html" %}
+{% block subject %}New pending payment #{{ payment.id }}{% endblock %}
+{% block preheader %}{{ user_email }} started a {{ pack.label }} purchase for ${{ pack.price_usd }}.{% endblock %}
+{% block kicker %}Pending payment{% endblock %}
+{% block content %}
+<p style="margin:0 0 10px;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#C27803;">&#9679;&nbsp; Waiting for funds</p>
+<h1 class="rf-h1" style="margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;color:#0F1117;">New pending payment</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#3D414D;">Once you have verified the payment, confirm it in the admin to credit the user automatically.</p>
+{% include "emails/_rows.html" %}
+{% include "emails/_button.html" with href=admin_url label="Open pending payments" %}
+{% endblock %}
+{% block footer_note %}Internal notification for RealFaceAI admins.{% endblock %}

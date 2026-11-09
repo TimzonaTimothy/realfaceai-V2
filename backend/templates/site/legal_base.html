@@ -1,0 +1,48 @@
+{% extends "site/base.html" %}
+
+{% block theme_color %}#FBFBFC{% endblock %}
+{% block nav %}{% include "site/_nav.html" %}{% endblock %}
+
+{% block content %}
+<header class="legal-hero">
+  <div class="wrap">
+    <span class="label"><span class="idx">Legal</span><span class="tick"></span>{% block doc_kicker %}{% endblock %}</span>
+    <h1 class="h1">{% block doc_title %}{% endblock %}</h1>
+    <div class="legal-hero__meta">
+      <span>Effective <b>{% block effective %}May 27, 2026{% endblock %}</b></span>
+      <span>RealFaceAI · realfaceai.app</span>
+      <span>Questions: <a href="mailto:support@realfaceai.app" class="accent">support@realfaceai.app</a></span>
+    </div>
+  </div>
+  <svg class="legal-hero__art" viewBox="0 0 300 150" aria-hidden="true">
+    <g fill="#0F1117">
+      <path d="M150 0 A75 75 0 0 0 150 150 Z" opacity=".06"/>
+    </g>
+    <g fill="#3A3DFF">
+      <rect x="156" y="4" width="17" height="17" rx="3.5"/><rect x="156" y="25" width="17" height="17" rx="3.5"/><rect x="156" y="46" width="17" height="17" rx="3.5"/><rect x="156" y="67" width="17" height="17" rx="3.5"/><rect x="156" y="88" width="17" height="17" rx="3.5"/><rect x="156" y="109" width="17" height="17" rx="3.5"/><rect x="156" y="130" width="17" height="17" rx="3.5"/>
+      <g opacity=".7"><rect x="179" y="27" width="13" height="13" rx="3"/><rect x="179" y="48" width="13" height="13" rx="3"/><rect x="179" y="69" width="13" height="13" rx="3"/><rect x="179" y="90" width="13" height="13" rx="3"/><rect x="179" y="111" width="13" height="13" rx="3"/><rect x="179" y="132" width="13" height="13" rx="3"/></g>
+      <g opacity=".45"><rect x="198" y="50" width="10" height="10" rx="2.5"/><rect x="198" y="71" width="10" height="10" rx="2.5"/><rect x="198" y="92" width="10" height="10" rx="2.5"/><rect x="198" y="134" width="10" height="10" rx="2.5"/></g>
+      <g opacity=".25"><rect x="214" y="73" width="7" height="7" rx="2"/><rect x="214" y="115" width="7" height="7" rx="2"/></g>
+    </g>
+    <circle cx="242" cy="20" r="5" fill="#E5322D"/>
+  </svg>
+</header>
+
+<div class="wrap">
+  <div class="legal">
+    <aside class="legal__toc">
+      <span class="label">On this page</span>
+      <nav aria-label="Sections">{% block toc %}{% endblock %}</nav>
+      <div class="others">
+        <span class="label" style="margin-bottom:8px">Policies</span>
+        <a href="/terms/"{% if request.path == '/terms/' %} aria-current="page"{% endif %}>Terms of Use</a>
+        <a href="/privacy/"{% if request.path == '/privacy/' %} aria-current="page"{% endif %}>Privacy Policy</a>
+        <a href="/consent/"{% if request.path == '/consent/' %} aria-current="page"{% endif %}>Consent Policy</a>
+      </div>
+    </aside>
+    <article class="legal__body">
+      {% block body %}{% endblock %}
+    </article>
+  </div>
+</div>
+{% endblock %}

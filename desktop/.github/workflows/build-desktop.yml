@@ -1,0 +1,135 @@
+# Builds the Windows installer (Inno Setup + MSIX) and the macOS DMG.
+#
+# Run it from GitHub → Actions → "Build desktop apps" → Run workflow,
+# or push a tag like v1.1.0 to also publish a GitHub Release with the files.
+#
+# The version comes from kAppVersion in lib/config/app_version.dart.
+# Nothing is code-signed: MSIX uses msix's self-signed test certificate,
+# macOS uses ad-hoc signing (users right-click → Open on first launch).
+
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write # needed to create the GitHub Release on tag pushes
+
+env:
+  FLUTTER_VERSION: '3.41.6'
+
+jobs:
+  windows:
+    # Visual Studio 2022, matching local builds. windows-latest moved to
+    # Visual Studio 2026, and Smart App Control blocked its unsigned output.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Read app version
+        id: version
+        shell: bash
+        run: echo "version=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)" >> "$GITHUB_OUTPUT"
+
+      - run: flutter pub get
+
+      - name: Build Flutter release
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      # Before MSIX: msix writes its .msix into the Release folder, and the
+      # installer packs that whole folder.
+      - name: Compile installer
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.version.outputs.version }}" installer.iss'
+
+      # Answers "No" to the certificate prompt; reuses the build above.
+      - name: Create MSIX
+        run: dart run msix:create --install-certificate false --build-windows false
+
+      # One artifact per file, so the downloads have no nested folders.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealFaceAI-Setup-${{ steps.version.outputs.version }}
+          path: installer_output/RealFaceAI-Setup-*.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealFaceAI-MSIX-${{ steps.version.outputs.version }}
+          path: build/windows/x64/runner/Release/*.msix
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Read app version
+        id: version
+        run: echo "version=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)" >> "$GITHUB_OUTPUT"
+
+      - run: flutter pub get
+
+      - name: Build Flutter release
+        run: flutter build macos --release
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          DMG="RealFaceAI-${{ steps.version.outputs.version }}.dmg"
+          APP="build/macos/Build/Products/Release/RealFaceAI.app"
+          make_dmg() {
+            create-dmg \
+              --volname "RealFaceAI" \
+              --volicon "assets/icon/app_icon.png" \
+              --window-pos 200 120 \
+              --window-size 540 380 \
+              --icon-size 128 \
+              --icon "RealFaceAI.app" 150 185 \
+              --hide-extension "RealFaceAI.app" \
+              --app-drop-link 390 185 \
+              --no-internet-enable \
+              "$@" "$DMG" "$APP"
+          }
+          # The Finder layout step (AppleScript) sometimes times out on CI
+          # runners; fall back to a DMG without the custom window layout.
+          make_dmg || { rm -f "$DMG"; make_dmg --skip-jenkins; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RealFaceAI-macOS-${{ steps.version.outputs.version }}
+          path: RealFaceAI-*.dmg
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**/*
+          generate_release_notes: true

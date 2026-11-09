@@ -1,0 +1,13 @@
+{% extends "emails/base.html" %}
+{% block subject %}New payment proof #{{ payment.id }}{% endblock %}
+{% block preheader %}{{ payment.user.email }} submitted proof for ${{ payment.amount_usd }}.{% endblock %}
+{% block kicker %}Action required{% endblock %}
+{% block content %}
+<p style="margin:0 0 10px;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#E5322D;">&#9679;&nbsp; Needs review</p>
+<h1 class="rf-h1" style="margin:0 0 8px;font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.03em;color:#0F1117;">New payment proof</h1>
+<p style="margin:0 0 24px;font-size:15px;line-height:1.65;color:#3D414D;">A user uploaded proof of payment. Check it against the chain, then confirm or reject it in the admin.</p>
+{% include "emails/_rows.html" %}
+{% include "emails/_button.html" with href=admin_url label="Review in admin" %}
+<p style="margin:16px 0 0;font-family:'JetBrains Mono',SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;color:#9A9EAB;">Submitted {{ proof.submitted_at|date:"Y-m-d H:i" }} UTC</p>
+{% endblock %}
+{% block footer_note %}Internal notification for RealFaceAI admins.{% endblock %}

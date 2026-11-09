@@ -1,0 +1,52 @@
+for users after downloading 
+since it's unsigned, macOS will block it on first launch. Tell users to:
+
+Right-click the app → Open → click Open anyway
+
+Or they can run once in terminal:
+on bash: bashxattr -rd com.apple.quarantine /Applications/RealFaceAI.app
+on zsh: xattr -dr com.apple.quarantine /Applications/RealFaceAI.app
+for obs 
+// Add a Browser Source correct
+
+// Click + in Sources → choose Browser.
+
+// Paste the /popout URL
+
+// In the Browser Source properties, set the URL to the one shown in the app after clicking OBS (visible in the green badge on the AI Output panel):
+
+// http://127.0.0.1:8700/popout
+// The port number may differ — always copy it from the badge in the app.
+
+// Set width & height to match your stream resolution
+
+// Typical values: 1920 × 1080. The page has a black background so letterboxing is invisible.
+
+// Start the stream in the app first, then click OBS in the app
+
+// The Browser Source shows "Waiting for stream…" until frames start arriving. Once you click the OBS button in the app the relay starts and OBS fills with the AI output only — no UI chrome.
+
+
+
+# 1. Build the release app
+flutter build macos --release
+
+
+
+
+# 2. Install create-dmg (one-time)
+brew install create-dmg
+
+# 3. Create the DMG
+create-dmg \
+  --volname "RealFaceAI" \
+  --volicon "assets/icon/app_icon.png" \
+  --window-pos 200 120 \
+  --window-size 540 380 \
+  --icon-size 128 \
+  --icon "RealFaceAI.app" 150 185 \
+  --hide-extension "RealFaceAI.app" \
+  --app-drop-link 390 185 \
+  --no-internet-enable \
+  "RealFaceAI-1.1.0.dmg" \
+  "build/macos/Build/Products/Release/RealFaceAI.app"

@@ -1,0 +1,52 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url opts|admin_urlname:'changelist' %}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p>
+    {% if action == "suspend_accounts" %}
+      <b>Suspended</b> accounts are fully locked out: sign-in, token refresh and every API call are refused.
+    {% else %}
+      <b>Frozen</b> accounts can sign in and view their account, but can't stream, generate, buy credits or upload payment proof.
+    {% endif %}
+    Either way it takes effect on the user's next request, and a live stream stops within about 10 seconds.
+  </p>
+
+  <h2>{{ queryset|length }} account{{ queryset|length|pluralize }} selected</h2>
+  <ul>
+    {% for obj in queryset|slice:":50" %}<li>{{ obj.email }} — currently <b>{{ obj.get_account_status_display }}</b></li>{% endfor %}
+    {% if queryset|length > 50 %}<li>… and {{ queryset|length|add:"-50" }} more</li>{% endif %}
+  </ul>
+
+  <form method="post">{% csrf_token %}
+    {% if form.non_field_errors %}{{ form.non_field_errors }}{% endif %}
+    <fieldset class="module aligned">
+      {% for field in form %}
+        <div class="form-row">
+          {{ field.errors }}
+          {{ field.label_tag }} {{ field }}
+          {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+        </div>
+      {% endfor %}
+    </fieldset>
+
+    {% for obj in queryset %}<input type="hidden" name="{{ action_checkbox_name }}" value="{{ obj.pk }}">{% endfor %}
+    <input type="hidden" name="action" value="{{ action }}">
+    <input type="hidden" name="apply" value="1">
+
+    <div class="submit-row">
+      <input type="submit" class="default" value="{{ title }}">
+      <a href="{% url opts|admin_urlname:'changelist' %}" class="button cancel-link">{% translate "Cancel" %}</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
