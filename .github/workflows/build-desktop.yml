@@ -4,27 +4,32 @@
 # or push a tag like v1.1.0 to also publish a GitHub Release with the files.
 #
 # The version comes from kAppVersion in lib/config/app_version.dart.
-# Nothing is code-signed: MSIX uses msix's self-signed test certificate,
+# Windows installers are unsigned: MSIX uses msix's self-signed test certificate,
 # macOS uses ad-hoc signing (users right-click → Open on first launch).
 
 name: Build desktop apps
 
 on:
   workflow_dispatch:
+  pull_request:
   push:
+    branches: [main, master]
     tags: ['v*']
 
 permissions:
-  contents: write # needed to create the GitHub Release on tag pushes
+  contents: read
 
 env:
   FLUTTER_VERSION: '3.41.6'
 
 jobs:
   windows:
-    # Visual Studio 2022, matching local builds. windows-latest moved to
-    # Visual Studio 2026, and Smart App Control blocked its unsigned output.
+    # Keep the Visual Studio 2022 toolchain used by this project.
     runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
 
@@ -37,15 +42,30 @@ jobs:
       - name: Read app version
         id: version
         shell: bash
-        run: echo "version=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::kAppVersion must contain a version such as 1.1.0"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$VERSION" ]]; then
+            echo "::error::Release tag must match kAppVersion ($VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - run: flutter pub get
 
       - name: Build Flutter release
-        run: flutter build windows --release
+        run: flutter build windows --release --build-name=${{ steps.version.outputs.version }}
 
       - name: Install Inno Setup
-        run: choco install innosetup -y --no-progress
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            choco install innosetup -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
       # Before MSIX: msix writes its .msix into the Release folder, and the
       # installer packs that whole folder.
@@ -54,23 +74,27 @@ jobs:
 
       # Answers "No" to the certificate prompt; reuses the build above.
       - name: Create MSIX
-        run: dart run msix:create --install-certificate false --build-windows false
+        run: dart run msix:create --install-certificate false --build-windows false --version ${{ steps.version.outputs.version }}.0
 
       # One artifact per file, so the downloads have no nested folders.
       - uses: actions/upload-artifact@v4
         with:
           name: RealFaceAI-Setup-${{ steps.version.outputs.version }}
-          path: installer_output/RealFaceAI-Setup-*.exe
+          path: desktop/installer_output/RealFaceAI-Setup-*.exe
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         with:
           name: RealFaceAI-MSIX-${{ steps.version.outputs.version }}
-          path: build/windows/x64/runner/Release/*.msix
+          path: desktop/build/windows/x64/runner/Release/*.msix
           if-no-files-found: error
 
   macos:
-    runs-on: macos-latest
+    runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: desktop
     steps:
       - uses: actions/checkout@v4
 
@@ -82,12 +106,23 @@ jobs:
 
       - name: Read app version
         id: version
-        run: echo "version=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)" >> "$GITHUB_OUTPUT"
+        shell: bash
+        run: |
+          VERSION=$(sed -nE "s/.*kAppVersion = '([^']+)'.*/\1/p" lib/config/app_version.dart)
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::kAppVersion must contain a version such as 1.1.0"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF#refs/tags/v}" != "$VERSION" ]]; then
+            echo "::error::Release tag must match kAppVersion ($VERSION)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - run: flutter pub get
 
       - name: Build Flutter release
-        run: flutter build macos --release
+        run: flutter build macos --release --build-name=${{ steps.version.outputs.version }}
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -96,10 +131,13 @@ jobs:
         run: |
           DMG="RealFaceAI-${{ steps.version.outputs.version }}.dmg"
           APP="build/macos/Build/Products/Release/RealFaceAI.app"
+          test -d "$APP"
+          STAGING=$(mktemp -d)
+          ditto "$APP" "$STAGING/RealFaceAI.app"
           make_dmg() {
             create-dmg \
               --volname "RealFaceAI" \
-              --volicon "assets/icon/app_icon.png" \
+              --volicon "macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon.icns" \
               --window-pos 200 120 \
               --window-size 540 380 \
               --icon-size 128 \
@@ -107,7 +145,7 @@ jobs:
               --hide-extension "RealFaceAI.app" \
               --app-drop-link 390 185 \
               --no-internet-enable \
-              "$@" "$DMG" "$APP"
+              "$@" "$DMG" "$STAGING"
           }
           # The Finder layout step (AppleScript) sometimes times out on CI
           # runners; fall back to a DMG without the custom window layout.
@@ -116,13 +154,15 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: RealFaceAI-macOS-${{ steps.version.outputs.version }}
-          path: RealFaceAI-*.dmg
+          path: desktop/RealFaceAI-*.dmg
           if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [windows, macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -133,3 +173,4 @@ jobs:
         with:
           files: dist/**/*
           generate_release_notes: true
+          fail_on_unmatched_files: true
