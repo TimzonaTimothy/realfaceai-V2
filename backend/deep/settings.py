@@ -388,7 +388,7 @@ CREDIT_PACKS = [
         "popular": False,
         "description": "1 hour of real-time AI streaming",
         "streaming_minutes": 60,
-        "sessions": 0,
+        "sessions": 30,
     },
     {
         "id": "creator",
@@ -398,7 +398,7 @@ CREDIT_PACKS = [
         "popular": False,
         "description": "5 hours of real-time AI streaming",
         "streaming_minutes": 300,
-        "sessions": 0,
+        "sessions": 150,
     },
     {
         "id": "pro",
@@ -408,7 +408,7 @@ CREDIT_PACKS = [
         "popular": True,
         "description": "10 hours of real-time AI streaming",
         "streaming_minutes": 600,
-        "sessions": 0,
+        "sessions": 300,
     },
     {
         "id": "agency",
@@ -418,7 +418,7 @@ CREDIT_PACKS = [
         "popular": False,
         "description": "25 hours of real-time AI streaming",
         "streaming_minutes": 1500,
-        "sessions": 0,
+        "sessions": 750,
     },
     {
         "id": "power",
@@ -428,9 +428,10 @@ CREDIT_PACKS = [
         "popular": False,
         "description": "50 hours of real-time AI streaming",
         "streaming_minutes": 3000,
-        "sessions": 0,
+        "sessions": 1500,
     },
 ]
+
 
 
 # ── Maintenance mode ──────────────────────────────────────────────────────────
