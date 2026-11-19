@@ -2041,8 +2041,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           <select id="cameraSelect" disabled>
             <option value="">Choose a camera</option>
           </select>
-          <button id="findCamerasBtn" disabled>Find cameras</button>
-          <p class="hint" id="cameraHint" role="status" hidden></p>
+          <button id="findCamerasBtn" disabled>Refresh cameras</button>
+          <p class="hint" id="cameraHint" role="status">Loading cameras…</p>
           <div class="row2">
             <button id="startBtn" disabled>▶ Start</button>
             <button id="stopBtn" disabled>■ Stop</button>
@@ -2170,14 +2170,15 @@ function setCameraControlsBusy(busy) {
   startBtn.disabled = busy || !cameraSelect.value;
 }
 
-async function refreshCameras(requestAccess) {
+async function refreshCameras() {
   setCameraControlsBusy(true);
-  cameraHint.hidden = true;
+  cameraHint.textContent = 'Loading cameras…';
+  cameraHint.hidden = false;
   const selected = cameraSelect.value;
   let probe;
   try {
     let cameras = await listCameras();
-    if (requestAccess && (!cameras.length || cameras.some(camera => !camera.label))) {
+    if (!cameras.length || cameras.some(camera => !camera.label)) {
       probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       cameras = await listCameras();
     }
@@ -2186,16 +2187,10 @@ async function refreshCameras(requestAccess) {
       cameraSelect.add(new Option(camera.label || 'Camera ' + (index + 1), camera.deviceId));
     });
     cameraSelect.value = cameras.some(camera => camera.deviceId === selected) ? selected : '';
-    findCamerasBtn.textContent = cameras.length ? 'Refresh cameras' : 'Find cameras';
-    if (requestAccess && !cameras.length) {
-      cameraHint.textContent = 'No cameras found. Connect or enable a camera and try again.';
-      cameraHint.hidden = false;
-    }
+    cameraHint.hidden = cameras.length > 0;
+    if (!cameras.length) cameraHint.textContent = 'No cameras found. Connect or enable a camera and try again.';
   } catch (error) {
-    if (requestAccess) {
-      cameraHint.textContent = cameraErrorMessage(error);
-      cameraHint.hidden = false;
-    }
+    cameraHint.textContent = cameraErrorMessage(error);
   } finally {
     probe?.getTracks().forEach(track => track.stop());
     setCameraControlsBusy(false);
@@ -2611,8 +2606,8 @@ window.goBack = function() {
 };
 startBtn.addEventListener('click', window.startStream);
 cameraSelect.addEventListener('change', () => setCameraControlsBusy(false));
-findCamerasBtn.addEventListener('click', () => refreshCameras(true));
-refreshCameras(false);
+findCamerasBtn.addEventListener('click', refreshCameras);
+refreshCameras();
 stopBtn.addEventListener('click', window.stopStream);
 document.getElementById('retryBtn').addEventListener('click', window.retryStream);
 applyFaceBtn.addEventListener('click', window.applyFace);
