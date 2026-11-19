@@ -1215,6 +1215,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
@@ -1303,6 +1304,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   String _sdkVersion = '0';
 
   static const int _preferredPort = 8700;
+  static const String _cameraPreferenceKey = 'realtime_camera_label';
+  String _preferredCameraLabel = '';
 
   // ──────────────────────────────────────────────────────────────────────────
   @override
@@ -1326,6 +1329,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   // ── Load assets ───────────────────────────────────────────────────────────
   Future<void> _loadAssets() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      _preferredCameraLabel = preferences.getString(_cameraPreferenceKey) ?? '';
+    } catch (error) {
+      debugPrint('[RealtimeScreen] Could not load camera preference: $error');
+    }
+
     // Logo (optional — text fallback if missing)
     try {
       final bytes =
@@ -1793,6 +1803,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         : '';
     final port = _port.toString();
     final windowsJs = Platform.isWindows ? 'true' : 'false';
+    final preferredCamera = _escape(_preferredCameraLabel);
     final sdkVersion = _sdkVersion;
     final initCredits =
         _creditsRemaining != null ? _creditsRemaining!.toStringAsFixed(1) : '';
@@ -1937,12 +1948,14 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   /* OBS */
   #obsBtn {
     background:var(--raised); color:var(--text); border:1px solid #3A4452;
-    opacity:.45; pointer-events:none;
   }
-  #obsBtn.visible { opacity:1; pointer-events:auto; }
-  #obsBtn.visible:hover { background:#252B33; }
+  #obsBtn:not(:disabled):hover { background:#252B33; }
   #obsBtn.active { background:rgba(3,166,109,.22); border-color:var(--green); color:#fff; }
   #obsUrlBadge { display:none; gap:6px; }
+  #obsSteps { padding-left:20px; }
+  #obsSteps li + li { margin-top:6px; }
+  #obsHelp p { margin-top:6px; }
+  #obsHelp summary { cursor:pointer; }
   #obsUrlBadge input {
     flex:1; min-width:0; background:var(--bg); color:var(--text);
     border:1px solid var(--border); border-radius:4px;
@@ -2037,12 +2050,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       <div class="panel">
         <div class="panel-h">Controls</div>
         <div class="panel-b">
-          <label for="cameraSelect">Camera</label>
+          <label for="cameraSelect">Camera input</label>
           <select id="cameraSelect" disabled>
             <option value="">Choose a camera</option>
           </select>
           <button id="findCamerasBtn" disabled>Refresh cameras</button>
           <p class="hint" id="cameraHint" role="status">Loading cameras…</p>
+          <p class="hint" id="obsInputHint" hidden>OBS Virtual Camera brings video from OBS into RealFaceAI.</p>
           <div class="row2">
             <button id="startBtn" disabled>▶ Start</button>
             <button id="stopBtn" disabled>■ Stop</button>
@@ -2054,17 +2068,33 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       <div class="panel">
         <div class="panel-h">OBS output</div>
         <div class="panel-b">
-          <button id="obsBtn" title="Toggle OBS frame relay">
+          <button id="obsBtn" disabled>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-9 9M3 21l9-9"/>
             </svg>
-            <span id="obsLabel">Send to OBS</span>
+            <span id="obsLabel">Send output to OBS</span>
           </button>
+          <p class="hint" id="obsWaiting" role="status">Start Realtime to send live video to OBS.</p>
           <div id="obsUrlBadge">
-            <input id="obsUrlInput" readonly value="">
-            <button id="obsCopyBtn">Copy</button>
+            <input id="obsUrlInput" aria-label="OBS Browser Source URL" readonly value="">
+            <button id="obsCopyBtn">Copy OBS URL</button>
           </div>
-          <div class="hint">Start the stream, press <b>Send to OBS</b>, then paste the URL into an OBS Browser Source (1920 × 1080).</div>
+          <p class="hint" id="obsCopyStatus" role="status" hidden></p>
+          <ol class="hint" id="obsSteps" hidden>
+            <li>In OBS, under <b>Sources</b>, choose <b>+</b>, then <b>Browser</b>.</li>
+            <li>Paste the copied link into the <b>URL</b> field.</li>
+            <li>Set <b>Width</b> to <b>1920</b> and <b>Height</b> to <b>1080</b>, then click <b>OK</b>.</li>
+          </ol>
+          <p class="hint" id="obsVirtualCameraSteps" hidden>
+            Once your video appears in the OBS preview, your OBS scene is ready.
+            To use it in another app, click <b>Start Virtual Camera</b> under <b>Controls</b> in OBS.
+            In the other app’s camera settings, select <b>OBS Virtual Camera</b> and check the preview.
+          </p>
+          <details class="hint" id="obsHelp" hidden>
+            <summary>No video?</summary>
+            <p><b>In OBS:</b> Check that Realtime is live and the <b>Stop sending to OBS</b> button is visible.</p>
+            <p><b>In the other app:</b> Check that the virtual camera is running in OBS and <b>OBS Virtual Camera</b> is selected in the app.</p>
+          </details>
         </div>
       </div>
 
@@ -2106,6 +2136,7 @@ const FACE_URL = '$faceDataUrl';
 const REFERENCE_URL = '$safeReference'; // face uploaded by the backend, if it could
 const SERVER   = 'http://127.0.0.1:$port';
 const IS_WINDOWS = $windowsJs;
+let preferredCameraLabel = '$preferredCamera';
 
 function notifyApp(name, arg) {
   return window.flutter_inappwebview?.callHandler(name, arg);
@@ -2140,6 +2171,7 @@ const startBtn       = document.getElementById('startBtn');
 const cameraSelect   = document.getElementById('cameraSelect');
 const findCamerasBtn = document.getElementById('findCamerasBtn');
 const cameraHint     = document.getElementById('cameraHint');
+const obsInputHint   = document.getElementById('obsInputHint');
 const stopBtn        = document.getElementById('stopBtn');
 const applyFaceBtn   = document.getElementById('applyFaceBtn');
 const obsBtn         = document.getElementById('obsBtn');
@@ -2170,11 +2202,17 @@ function setCameraControlsBusy(busy) {
   startBtn.disabled = busy || !cameraSelect.value;
 }
 
+function updateCameraSelection() {
+  const label = cameraSelect.selectedOptions[0]?.textContent || '';
+  obsInputHint.hidden = !label.toLowerCase().includes('obs virtual camera');
+}
+
 async function refreshCameras() {
   setCameraControlsBusy(true);
   cameraHint.textContent = 'Loading cameras…';
   cameraHint.hidden = false;
   const selected = cameraSelect.value;
+  const firstLoad = cameraSelect.options.length === 1;
   let probe;
   try {
     let cameras = await listCameras();
@@ -2186,7 +2224,14 @@ async function refreshCameras() {
     cameras.forEach((camera, index) => {
       cameraSelect.add(new Option(camera.label || 'Camera ' + (index + 1), camera.deviceId));
     });
-    cameraSelect.value = cameras.some(camera => camera.deviceId === selected) ? selected : '';
+    // Device IDs are scoped to the WebView origin, whose local port can change.
+    const matches = firstLoad && preferredCameraLabel
+      ? cameras.filter(camera => camera.label === preferredCameraLabel)
+      : [];
+    cameraSelect.value = cameras.some(camera => camera.deviceId === selected)
+      ? selected
+      : (matches.length === 1 ? matches[0].deviceId : '');
+    updateCameraSelection();
     cameraHint.hidden = cameras.length > 0;
     if (!cameras.length) cameraHint.textContent = 'No cameras found. Connect or enable a camera and try again.';
   } catch (error) {
@@ -2274,12 +2319,36 @@ function _stopObsRelay() {
 
 const obsLabel      = document.getElementById('obsLabel');
 const obsUrlInput   = document.getElementById('obsUrlInput');
+const obsWaiting    = document.getElementById('obsWaiting');
+const obsSteps      = document.getElementById('obsSteps');
+const obsVirtualCameraSteps = document.getElementById('obsVirtualCameraSteps');
+const obsHelp       = document.getElementById('obsHelp');
+const obsCopyStatus = document.getElementById('obsCopyStatus');
+
+remoteVideo.addEventListener('playing', () => {
+  if (!realtime) return;
+  obsBtn.disabled = false;
+  obsWaiting.hidden = true;
+});
 
 function _obsUiOff() {
   obsBtn.classList.remove('active');
-  obsLabel.textContent      = 'Send to OBS';
+  obsLabel.textContent      = 'Send output to OBS';
   obsUrlBadge.style.display = 'none';
   obsUrlInput.value         = '';
+  obsSteps.hidden = true;
+  obsVirtualCameraSteps.hidden = true;
+  obsHelp.hidden = true;
+  obsHelp.open = false;
+  obsCopyStatus.hidden = true;
+}
+
+function resetObsOutput() {
+  _stopObsRelay();
+  _obsUiOff();
+  obsBtn.disabled = true;
+  obsWaiting.textContent = 'Start Realtime to send live video to OBS.';
+  obsWaiting.hidden = false;
 }
 
 window.toggleObs = function() {
@@ -2290,16 +2359,23 @@ window.toggleObs = function() {
     if (!remoteVideo.srcObject) return;
     _startObsRelay();
     obsBtn.classList.add('active');
-    obsLabel.textContent      = 'Sending to OBS';
+    obsLabel.textContent      = 'Stop sending to OBS';
     obsUrlInput.value         = SERVER + '/popout';
     obsUrlBadge.style.display = 'flex';
+    obsSteps.hidden = false;
+    obsVirtualCameraSteps.hidden = false;
+    obsHelp.hidden = false;
   }
 };
 
 window.copyObsUrl = async function() {
-  obsUrlInput.select();
-  try { await navigator.clipboard.writeText(obsUrlInput.value); }
-  catch (_) { document.execCommand('copy'); }
+  let copied = false;
+  try { copied = (await notifyApp('copyObsUrl')) === true; }
+  catch (_) {}
+  if (!_obsRelayActive) return;
+  if (!copied) obsUrlInput.select();
+  obsCopyStatus.textContent = copied ? 'URL copied' : 'Copy the selected URL manually.';
+  obsCopyStatus.hidden = false;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -2321,6 +2397,7 @@ function setStatus(msg, live = false) {
 }
 
 function showError(msg) {
+  resetObsOutput();
   msg = scrub(msg);
   errMsg.textContent = msg;
   errOverlay.classList.add('show');
@@ -2432,7 +2509,6 @@ function onFirstOutput() {
   console.log('[Stream] AI video playing at ' + remoteVideo.videoWidth + 'x' + remoteVideo.videoHeight);
   remotePh.style.display = 'none';
   stopBtn.disabled = false;
-  obsBtn.classList.add('visible');
 
   // Elapsed timer — runs entirely in JS, no Dart round-trip needed
   hudTime.style.display = '';
@@ -2448,7 +2524,8 @@ function onFirstOutput() {
 
   if (FACE_URL && FACE_URL.length > 0) applyFaceBtn.classList.add('visible');
 
-  notifyApp('onStreamStarted');
+  preferredCameraLabel = localStream?.getVideoTracks()[0]?.label || preferredCameraLabel;
+  notifyApp('onStreamStarted', preferredCameraLabel);
 }
 
 // ── START ─────────────────────────────────────────────────────────────────────
@@ -2460,6 +2537,7 @@ window.startStream = async function() {
   setCameraControlsBusy(true);
   _sessionStarted = false;
   setStatus('Requesting camera…');
+  obsWaiting.textContent = 'Waiting for live video…';
 
   const fmt = pickFormat();
   try {
@@ -2469,6 +2547,7 @@ window.startStream = async function() {
     cameraHint.textContent = cameraErrorMessage(error);
     cameraHint.hidden = false;
     setStatus('Camera unavailable');
+    resetObsOutput();
     setCameraControlsBusy(false);
     return;
   }
@@ -2560,9 +2639,7 @@ window.stopStream = function(reason) {
   if (stopSub) stopSub.textContent = scrub(why) || 'Your session has been stopped.';
   if (window._remoteWatchdog) { clearTimeout(window._remoteWatchdog); window._remoteWatchdog = null; }
   _sessionStarted = false;
-  _stopObsRelay();
-  obsBtn.classList.remove('visible');
-  _obsUiOff();
+  resetObsOutput();
 
   teardownSession();
   localStream?.getTracks().forEach(t => t.stop());
@@ -2605,7 +2682,10 @@ window.goBack = function() {
   notifyApp('onGoBack');
 };
 startBtn.addEventListener('click', window.startStream);
-cameraSelect.addEventListener('change', () => setCameraControlsBusy(false));
+cameraSelect.addEventListener('change', () => {
+  updateCameraSelection();
+  setCameraControlsBusy(false);
+});
 findCamerasBtn.addEventListener('click', refreshCameras);
 refreshCameras();
 stopBtn.addEventListener('click', window.stopStream);
@@ -2687,7 +2767,33 @@ window.addEventListener('load', function() {
 
                 controller.addJavaScriptHandler(
                   handlerName: 'onStreamStarted',
-                  callback: (_) => _onPageStarted(),
+                  callback: (args) async {
+                    _onPageStarted();
+                    final label = args.isEmpty ? null : args.first;
+                    if (label is! String ||
+                        label.isEmpty ||
+                        label == _preferredCameraLabel) {
+                      return;
+                    }
+                    _preferredCameraLabel = label;
+                    try {
+                      final preferences = await SharedPreferences.getInstance();
+                      await preferences.setString(_cameraPreferenceKey, label);
+                    } catch (error) {
+                      debugPrint(
+                          '[RealtimeScreen] Could not save camera preference: $error');
+                    }
+                  },
+                );
+
+                controller.addJavaScriptHandler(
+                  handlerName: 'copyObsUrl',
+                  callback: (_) async {
+                    await Clipboard.setData(
+                      ClipboardData(text: 'http://127.0.0.1:$_port/popout'),
+                    );
+                    return true;
+                  },
                 );
 
                 controller.addJavaScriptHandler(

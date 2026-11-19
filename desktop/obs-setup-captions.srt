@@ -1,0 +1,47 @@
+1
+00:00:00,000 --> 00:00:06,000
+Open Realtime and wait for the camera list to load.
+
+2
+00:00:06,000 --> 00:00:13,000
+Under Camera input, choose your integrated webcam.
+Click Start.
+
+3
+00:00:13,000 --> 00:00:22,000
+Once the live video appears, click Send output to OBS,
+then Copy OBS URL.
+
+4
+00:00:22,000 --> 00:00:32,000
+In OBS, click + under Sources and choose Browser.
+Name the source RealFaceAI and click OK.
+
+5
+00:00:32,000 --> 00:00:44,000
+Paste the copied link into URL.
+Set Width to 1920 and Height to 1080, then click OK.
+
+6
+00:00:44,000 --> 00:00:49,000
+Your OBS scene is ready when the video appears in the preview.
+
+7
+00:00:49,000 --> 00:00:55,000
+To use the video in another app, click
+Start Virtual Camera under Controls in OBS.
+
+8
+00:00:55,000 --> 00:01:01,000
+In the other app, select OBS Virtual Camera
+in camera settings and check the preview.
+
+9
+00:01:01,000 --> 00:01:07,000
+No video in OBS? Check that Realtime is live
+and sending output to OBS.
+
+10
+00:01:07,000 --> 00:01:14,000
+No video in the other app? Check that the virtual camera
+is running in OBS and selected in the app.
