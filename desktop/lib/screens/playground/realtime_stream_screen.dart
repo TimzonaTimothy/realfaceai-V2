@@ -1215,7 +1215,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
@@ -1243,15 +1242,6 @@ import '../../utils/error_handler.dart';
 //  JS side uses requestVideoFrameCallback + back-pressure so a slow POST
 //  never queues up frames. Net result: ~0 ms poll lag, no base64 overhead.
 //
-//  Windows: the page opens in the user's default browser instead of WebView2
-//  (WebView2 failed to open the camera on some machines, e.g. HP Omen). The
-//  page talks to Dart over the local server instead of JS handlers:
-//    /api/started → start billing heartbeat
-//    /api/stopped → stop heartbeat + fetch a fresh token (page then reloads)
-//    /api/status  → page polls every 2 s: credits, forced stop, liveness
-//    /api/closed  → tab closed/reloaded mid-stream (sendBeacon)
-//    /api/back    → back to studio
-//  All /api/* calls carry a per-session key so other local pages can't use them.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 /// The streaming model is NOT chosen by the app: the backend returns it (with
@@ -1297,19 +1287,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   // ── WebView ────────────────────────────────────────────────────────────────
   InAppWebViewController? _webViewController;
-  bool _streaming = false;
 
-  // ── External browser mode (Windows) ────────────────────────────────────────
-  // macOS stays in WKWebView: Chrome blocks the OBS pop-out there.
-  final bool _external = Platform.isWindows;
-  final String _pageKey = List.generate(
-      16, (_) => Random.secure().nextInt(256).toRadixString(16).padLeft(2, '0'))
-      .join();
-  DateTime _lastPagePing = DateTime.now();
-  String? _pendingStop; // reason handed to the page on its next /api/status
-
-  // ── Timers ─────────────────────────────────────────────────────────────────
-  Timer? _elapsedTimer;
   Timer? _heartbeatTimer;
 
   // ── Assets (loaded once at boot) ──────────────────────────────────────────
@@ -1335,7 +1313,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   @override
   void dispose() {
-    _elapsedTimer?.cancel();
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1370,8 +1347,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     }
 
     try {
-      final bytes =
-          await rootBundle.load('assets/js/frame-metadata-worker.js');
+      final bytes = await rootBundle.load('assets/js/frame-metadata-worker.js');
       _workerBytes = bytes.buffer.asUint8List();
     } catch (e) {
       debugPrint('[RealtimeScreen] WARNING: frame-metadata-worker.js '
@@ -1392,13 +1368,20 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   // ── BOOT ──────────────────────────────────────────────────────────────────
   Future<void> _boot() async {
+    if (!mounted) return;
     setState(() {
       _phase = _Phase.fetchingToken;
       _error = null;
     });
 
-    // Step 1 — fetch streaming token from your backend
+    // Step 1 — check the embedded runtime and fetch the streaming token.
     try {
+      if (Platform.isWindows &&
+          await WebViewEnvironment.getAvailableVersion() == null) {
+        throw Exception('Microsoft Edge WebView2 Runtime is required. '
+            'Reinstall RealFaceAI to install it, then try again.');
+      }
+      if (!mounted) return;
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
         prompt: widget.prompt,
@@ -1433,6 +1416,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     }
 
     // Step 2 — start local HTTP server
+    if (!mounted) return;
     try {
       setState(() => _phase = _Phase.startingServer);
       await _startServer();
@@ -1445,20 +1429,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       return;
     }
 
-    // Step 3 — show WebView (or open the browser on Windows)
     if (mounted) setState(() => _phase = _Phase.ready);
-    if (_external) await _openInBrowser();
-  }
-
-  Future<void> _openInBrowser() async {
-    final url = Uri.parse('http://127.0.0.1:$_port');
-    final ok = await launchUrl(url, mode: LaunchMode.externalApplication)
-        .catchError((_) => false);
-    if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Could not open your browser. Open $url manually.'),
-      ));
-    }
   }
 
   /// Reads the model + prompt the backend chose for this session.
@@ -1477,15 +1448,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
-      // Browser tab closed or crashed without telling us — stop billing.
-      if (_external &&
-          DateTime.now().difference(_lastPagePing) > const Duration(seconds: 20)) {
-        debugPrint('[RealtimeScreen] browser page stopped polling — '
-            'ending session');
-        _stopHeartbeat();
-        if (mounted) setState(() => _streaming = false);
-        return;
-      }
       try {
         final result = await ApiService.instance.streamHeartbeat();
         if (!mounted) return;
@@ -1520,20 +1482,9 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     _heartbeatTimer = null;
   }
 
-  void _stopElapsedTimer() {
-    _elapsedTimer?.cancel();
-    _elapsedTimer = null;
-  }
-
-  /// Ends the stream in the page: directly in the WebView, or on the browser
-  /// page's next /api/status poll.
   void _stopPage(String reason) {
-    if (_external) {
-      _pendingStop = reason;
-    } else {
-      _webViewController?.evaluateJavascript(
-          source: 'stopStream(${jsonEncode(reason)});');
-    }
+    _webViewController?.evaluateJavascript(
+        source: 'stopStream(${jsonEncode(reason)});');
   }
 
   String? get _creditsText => _creditsRemaining == null
@@ -1551,7 +1502,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   /// Push updated credits + estimated remaining time into the live WebView.
-  /// (The browser page picks these up from /api/status instead.)
   void _pushCreditsUpdate() {
     if (_webViewController == null || _creditsRemaining == null) return;
     _webViewController!.evaluateJavascript(source: """
@@ -1566,9 +1516,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   void _onPageStarted() {
     if (!mounted) return;
-    _lastPagePing = DateTime.now();
-    _pendingStop = null;
-    setState(() => _streaming = true);
     _startHeartbeat();
     _pushCreditsUpdate();
   }
@@ -1576,10 +1523,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   /// Stream stopped in the page: stop billing and fetch a fresh token so the
   /// next START gets a new session (the reloaded page bakes it in).
   Future<void> _onPageStopped() async {
-    _stopElapsedTimer();
     _stopHeartbeat();
     if (!mounted) return;
-    setState(() => _streaming = false);
     try {
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
@@ -1592,7 +1537,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   void _onPageBack() {
-    _stopElapsedTimer();
     _stopHeartbeat();
     _server?.close(force: true);
     if (mounted) context.go('/playground');
@@ -1602,8 +1546,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   Future<void> _startServer() async {
     await _server?.close(force: true);
     _port = await _findFreePort();
-    _server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port!);
-    _server!.listen(_handleRequest);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, _port!);
+    if (!mounted) {
+      await server.close(force: true);
+      return;
+    }
+    _server = server;
+    server.listen(_handleRequest);
   }
 
   Future<void> _handleRequest(HttpRequest req) async {
@@ -1622,51 +1571,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     if (req.method == 'OPTIONS') {
       req.response.statusCode = 204;
       await req.response.close();
-      return;
-    }
-
-    // ── Browser-mode bridge (replaces the WebView JS handlers) ──────────────
-    if (path.startsWith('/api/')) {
-      if (req.uri.queryParameters['k'] != _pageKey) {
-        req.response
-          ..statusCode = 403
-          ..close();
-        return;
-      }
-      _lastPagePing = DateTime.now();
-      switch (path) {
-        case '/api/started':
-          _onPageStarted();
-        case '/api/stopped':
-          await _onPageStopped(); // page reloads once this returns
-        case '/api/closed':
-          _stopElapsedTimer();
-          _stopHeartbeat();
-          if (mounted) setState(() => _streaming = false);
-        case '/api/back':
-          req.response
-            ..statusCode = 204
-            ..close();
-          _onPageBack();
-          return;
-        case '/api/status':
-          final stop = _pendingStop;
-          _pendingStop = null;
-          req.response
-            ..statusCode = 200
-            ..headers.set('Content-Type', 'application/json')
-            ..headers.set('Cache-Control', 'no-store')
-            ..write(jsonEncode({
-              'credits': _creditsText,
-              'remain': _remainText,
-              'stop': stop,
-            }))
-            ..close();
-          return;
-      }
-      req.response
-        ..statusCode = 204
-        ..close();
       return;
     }
 
@@ -1810,6 +1714,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         req.response
           ..statusCode = 200
           ..headers.set('Content-Type', 'text/html; charset=utf-8')
+          ..headers.set('Cache-Control', 'no-store')
           ..write(_buildHtml())
           ..close();
     }
@@ -1887,8 +1792,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         ? 'data:image/jpeg;base64,${widget.faceImageBase64}'
         : '';
     final port = _port.toString();
-    final externalJs = _external ? 'true' : 'false';
-    final pageKey = _pageKey;
+    final windowsJs = Platform.isWindows ? 'true' : 'false';
     final sdkVersion = _sdkVersion;
     final initCredits =
         _creditsRemaining != null ? _creditsRemaining!.toStringAsFixed(1) : '';
@@ -2188,47 +2092,11 @@ const PROMPT_ENHANCE = $enhanceJs;
 const FACE_URL = '$faceDataUrl';
 const REFERENCE_URL = '$safeReference'; // face uploaded by the backend, if it could
 const SERVER   = 'http://127.0.0.1:$port';
-const EXTERNAL = $externalJs;           // true = running in the user's browser (Windows)
-const APP_KEY  = '$pageKey';
+const IS_WINDOWS = $windowsJs;
 
-// ── App bridge ────────────────────────────────────────────────────────────────
-// WebView: JS handlers. Browser: POST to the app's local server.
 function notifyApp(name, arg) {
-  if (!EXTERNAL) {
-    if (window.flutter_inappwebview) return window.flutter_inappwebview.callHandler(name, arg);
-    return Promise.resolve();
-  }
-  const route = { onStreamStarted: 'started', onStreamStopped: 'stopped', onError: 'closed', onGoBack: 'back' }[name];
-  if (!route) return Promise.resolve();
-  return fetch(SERVER + '/api/' + route + '?k=' + APP_KEY, { method: 'POST' }).catch(() => {});
+  return window.flutter_inappwebview?.callHandler(name, arg);
 }
-
-// Browser mode: poll the app for credits / forced stop. If the app is gone
-// (closed, navigated away) the poll fails — stop rather than stream unbilled.
-let _statusPoll = null;
-function _startStatusPoll() {
-  if (!EXTERNAL || _statusPoll) return;
-  let failures = 0;
-  _statusPoll = setInterval(async () => {
-    try {
-      const res = await fetch(SERVER + '/api/status?k=' + APP_KEY, { cache: 'no-store' });
-      const s = await res.json();
-      failures = 0;
-      if (s.credits) hudCredits.textContent = s.credits;
-      const hudR = document.getElementById('hudRemain');
-      if (s.remain && hudR) hudR.textContent = s.remain;
-      if (s.stop) stopStream(s.stop);
-    } catch (_) {
-      if (++failures >= 3) stopStream('The RealFaceAI app was closed. Reopen it to keep streaming.');
-    }
-  }, 2000);
-}
-function _stopStatusPoll() {
-  if (_statusPoll) { clearInterval(_statusPoll); _statusPoll = null; }
-}
-window.addEventListener('pagehide', () => {
-  if (EXTERNAL && realtime) navigator.sendBeacon(SERVER + '/api/closed?k=' + APP_KEY);
-});
 
 // ── Camera ────────────────────────────────────────────────────────────────────
 // Windows laptops (HP Omen, HP Wide Vision…) expose several cameras, including
@@ -2387,9 +2255,9 @@ window.toggleObs = function() {
   }
 };
 
-window.copyObsUrl = function() {
+window.copyObsUrl = async function() {
   obsUrlInput.select();
-  try { navigator.clipboard.writeText(obsUrlInput.value); }
+  try { await navigator.clipboard.writeText(obsUrlInput.value); }
   catch (_) { document.execCommand('copy'); }
 };
 
@@ -2420,7 +2288,6 @@ function showError(msg) {
   stopBtn.disabled  = true;
   if (window._hudTimerInterval) { clearInterval(window._hudTimerInterval); window._hudTimerInterval = null; }
   hudTime.textContent = '--:--';
-  _stopStatusPoll();
   notifyApp('onError', msg);
 }
 
@@ -2541,7 +2408,6 @@ function onFirstOutput() {
   if (FACE_URL && FACE_URL.length > 0) applyFaceBtn.classList.add('visible');
 
   notifyApp('onStreamStarted');
-  _startStatusPoll();
 }
 
 // ── START ─────────────────────────────────────────────────────────────────────
@@ -2611,8 +2477,8 @@ window.startStream = async function() {
     let friendly = (err && err.message) ? err.message : String(err);
     const name = (err && err.name) || '';
     if (name === 'NotAllowedError' || friendly.includes('Permission denied') || friendly.includes('NotAllowedError')) {
-      friendly = EXTERNAL
-        ? 'Camera access was denied. Click the camera icon in the address bar, allow the camera, then try again. Also check Windows Settings → Privacy & security → Camera.'
+      friendly = IS_WINDOWS
+        ? 'Camera access was denied. In Windows Settings → Privacy & security → Camera, turn on camera access and allow desktop apps to access your camera.'
         : 'Camera access was denied. Please allow camera access and try again.';
     } else if (name === 'NotFoundError' || friendly.includes('NotFoundError') || friendly.includes('DevicesNotFound')) {
       friendly = 'No camera found. Please connect a webcam and try again.';
@@ -2677,16 +2543,13 @@ window.stopStream = function(reason) {
   if (hudR) hudR.textContent = '—';
 
   stoppedOverlay.classList.add('show');
-  _stopStatusPoll();
 
-  // Browser: the app fetches a fresh token, then we reload to pick it up
-  // (the WebView is reloaded by the app itself).
-  notifyApp('onStreamStopped').then((r) => { if (EXTERNAL && r && r.ok) location.reload(); });
+  notifyApp('onStreamStopped');
 };
 
 window.retryStream = function() {
   errOverlay.classList.remove('show');
-  notifyApp('onStreamStopped').then((r) => { if (EXTERNAL && r && r.ok) location.reload(); });
+  notifyApp('onStreamStopped');
 };
 
 window.applyFace = async function() {
@@ -2697,26 +2560,11 @@ window.applyFace = async function() {
 };
 
 window.goBack = function() {
-  if (EXTERNAL) {
-    // End the session here; stopStream() would reload the page.
-    _stopStatusPoll();
-    teardownSession();
-    localStream?.getTracks().forEach(t => t.stop());
-    localStream = null;
-  }
-  notifyApp('onGoBack').then(() => {
-    if (EXTERNAL) document.body.innerHTML = '<div style="height:100%;display:flex;align-items:center;justify-content:center;color:#8A91A3;font-family:system-ui">Session closed. You can close this tab.</div>';
-  });
+  teardownSession();
+  localStream?.getTracks().forEach(t => t.stop());
+  localStream = null;
+  notifyApp('onGoBack');
 };
-
-// ── Wire buttons ──────────────────────────────────────────────────────────────
-document.getElementById('startBtn').addEventListener('click', startStream);
-document.getElementById('stopBtn').addEventListener('click', stopStream);
-document.getElementById('retryBtn').addEventListener('click', retryStream);
-document.getElementById('applyFaceBtn').addEventListener('click', applyFace);
-document.getElementById('obsBtn').addEventListener('click', toggleObs);
-document.getElementById('obsCopyBtn').addEventListener('click', copyObsUrl);
-document.getElementById('backBtn').addEventListener('click', goBack);
 document.getElementById('goBackBtn').addEventListener('click', goBack);
 
 // Show initial credits if available at page load
@@ -2777,10 +2625,9 @@ window.addEventListener('load', function() {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(
+        fit: StackFit.expand,
         children: [
-          if (_phase == _Phase.ready && _port != null && _external)
-            _buildBrowserPanel(),
-          if (_phase == _Phase.ready && _port != null && !_external)
+          if (_phase == _Phase.ready && _port != null)
             InAppWebView(
               initialUrlRequest: URLRequest(
                 url: WebUri('http://127.0.0.1:$_port'),
@@ -2801,8 +2648,6 @@ window.addEventListener('load', function() {
                         args.isNotEmpty ? args[0].toString() : 'Stream error';
                     debugPrint('[RealtimeScreen] JS error: $msg');
                     if (!mounted) return;
-                    setState(() => _streaming = false);
-                    _stopElapsedTimer();
                     _stopHeartbeat();
                   },
                 );
@@ -2817,120 +2662,44 @@ window.addEventListener('load', function() {
                   callback: (_) async {
                     await _onPageStopped();
                     // Reload the WebView — new token will be baked into fresh HTML
-                    await _webViewController?.reload();
+                    if (mounted && _phase == _Phase.ready) {
+                      await controller.reload();
+                    }
                   },
                 );
               },
               onPermissionRequest: (controller, request) async {
                 debugPrint('[RealtimeScreen] Permission: ${request.resources}');
+                final origin = Uri.tryParse(request.origin.toString());
+                final allow = origin?.scheme == 'http' &&
+                    origin?.host == '127.0.0.1' &&
+                    origin?.port == _port &&
+                    request.resources.length == 1 &&
+                    request.resources.single == PermissionResourceType.CAMERA;
                 return PermissionResponse(
                   resources: request.resources,
-                  action: PermissionResponseAction.GRANT,
+                  action: allow
+                      ? PermissionResponseAction.GRANT
+                      : PermissionResponseAction.DENY,
                 );
               },
               onConsoleMessage: (_, msg) =>
                   debugPrint('[WebView] ${msg.message}'),
-              onLoadError: (_, url, code, message) =>
-                  debugPrint('[WebView] Load error $code: $message'),
+              onReceivedError: (_, request, error) {
+                if (!mounted || request.isForMainFrame != true) return;
+                debugPrint('[WebView] Load error: ${error.description}');
+                _stopHeartbeat();
+                _webViewController = null;
+                setState(() {
+                  _phase = _Phase.error;
+                  _error = 'The embedded streaming view could not load.';
+                });
+              },
             ),
           if (_phase != _Phase.ready && _phase != _Phase.error)
             _buildLoadingOverlay(),
           if (_phase == _Phase.error) _buildErrorOverlay(),
         ],
-      ),
-    );
-  }
-
-  // ── Windows: stream runs in the browser; the app keeps the server alive ────
-  Widget _buildBrowserPanel() {
-    final url = 'http://127.0.0.1:$_port';
-    // The app theme gives outlined buttons a light card fill; this panel is
-    // on the dark stream surface.
-    final outlined = OutlinedButton.styleFrom(
-      foregroundColor: AppColors.screenText,
-      backgroundColor: AppColors.screenRaised,
-      side: const BorderSide(color: AppColors.screenBorder),
-      minimumSize: const Size(0, 44),
-    );
-    return Container(
-      color: AppColors.screen,
-      padding: const EdgeInsets.all(40),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: AppColors.accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(
-                    _streaming
-                        ? Icons.sensors_rounded
-                        : Icons.open_in_browser_rounded,
-                    color: AppColors.accent,
-                    size: 28),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                _streaming
-                    ? 'You’re live in your browser'
-                    : 'Stream opened in your browser',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: AppColors.screenText,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Press Start in the browser tab and allow camera access. '
-                'Keep this app open while you stream — closing it ends the session.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    color: AppColors.screenMuted, fontSize: 14.5, height: 1.5),
-              ),
-              const SizedBox(height: 20),
-              SelectableText(
-                url,
-                style: TextStyle(
-                    color: AppColors.accent,
-                    fontFamily: 'JetBrainsMono',
-                    fontSize: 13),
-              ),
-              const SizedBox(height: 28),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                alignment: WrapAlignment.center,
-                children: [
-                  OutlinedButton(
-                    style: outlined,
-                    onPressed: _onPageBack,
-                    child: const Text('Back to studio'),
-                  ),
-                  OutlinedButton.icon(
-                    style: outlined,
-                    icon: const Icon(Icons.copy_rounded, size: 16),
-                    label: const Text('Copy link'),
-                    onPressed: () => Clipboard.setData(ClipboardData(text: url)),
-                  ),
-                  ElevatedButton.icon(
-                    style:
-                        ElevatedButton.styleFrom(minimumSize: const Size(0, 44)),
-                    icon: const Icon(Icons.open_in_browser_rounded, size: 18),
-                    label: const Text('Reopen browser'),
-                    onPressed: _openInBrowser,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -3013,7 +2782,8 @@ window.addEventListener('load', function() {
                     child: const Text('Back to studio'),
                   ),
                   ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(minimumSize: const Size(0, 44)),
+                    style: ElevatedButton.styleFrom(
+                        minimumSize: const Size(0, 44)),
                     icon: const Icon(Icons.refresh_rounded, size: 18),
                     label: const Text('Try again'),
                     onPressed: _boot,
