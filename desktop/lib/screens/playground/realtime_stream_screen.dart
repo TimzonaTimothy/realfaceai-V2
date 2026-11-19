@@ -1926,6 +1926,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   /* Controls */
   .row2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  #cameraSelect {
+    width:100%; min-width:0; padding:8px; border-radius:8px;
+    background:var(--bg); color:var(--text); border:1px solid var(--border);
+    font:inherit;
+  }
+  label[for="cameraSelect"] { font-size:12px; color:var(--muted); }
+  #findCamerasBtn { background:var(--raised); color:var(--text); }
 
   /* OBS */
   #obsBtn {
@@ -2030,8 +2037,14 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       <div class="panel">
         <div class="panel-h">Controls</div>
         <div class="panel-b">
+          <label for="cameraSelect">Camera</label>
+          <select id="cameraSelect" disabled>
+            <option value="">Choose a camera</option>
+          </select>
+          <button id="findCamerasBtn" disabled>Find cameras</button>
+          <p class="hint" id="cameraHint" role="status" hidden></p>
           <div class="row2">
-            <button id="startBtn">▶ Start</button>
+            <button id="startBtn" disabled>▶ Start</button>
             <button id="stopBtn" disabled>■ Stop</button>
           </div>
           <button id="applyFaceBtn">😊 Re-apply face</button>
@@ -2099,57 +2112,34 @@ function notifyApp(name, arg) {
 }
 
 // ── Camera ────────────────────────────────────────────────────────────────────
-// Windows laptops (HP Omen, HP Wide Vision…) expose several cameras, including
-// an IR (Windows Hello) one that can be picked by default and gives no usable
-// picture. Try relaxed constraints, then each real camera by id. Permission
-// errors are thrown straight away; busy/overconstrained ones move on.
-const _isIrCamera = (label) => /(\\bir\\b|infrared|depth|hello)/i.test(label || '');
+async function listCameras() {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices.filter(d => d.kind === 'videoinput' && d.deviceId);
+}
 
-async function openCamera(fps, mw, mh) {
-  const ideal = { frameRate: { ideal: fps }, width: { ideal: mw }, height: { ideal: mh } };
-  let lastErr = null;
-  const tryOpen = async (video) => {
-    try { return await navigator.mediaDevices.getUserMedia({ video, audio: false }); }
-    catch (e) {
-      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) throw e;
-      console.warn('[Stream] camera attempt failed: ' + (e && e.name) + ' — ' + (e && e.message));
-      lastErr = e;
-      return null;
-    }
-  };
-
-  let stream = await tryOpen(ideal) || await tryOpen(true);
-
-  // Device labels are only readable after permission was granted.
-  let cams = [];
-  try { cams = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (_) {}
-  console.log('[Stream] cameras: ' + (cams.map(d => d.label || '(unnamed)').join(' | ') || 'none'));
-
-  const track = stream && stream.getVideoTracks()[0];
-  if (track && !_isIrCamera(track.label)) {
-    console.log('[Stream] using camera: ' + track.label);
-    return stream;
+async function openCamera(id, format) {
+  const deviceId = { exact: id };
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      video: {
+        deviceId,
+        width: { ideal: format.width },
+        height: { ideal: format.height },
+        frameRate: { ideal: format.fps || 30 },
+      },
+      audio: false,
+    });
+  } catch (error) {
+    if (error.name !== 'OverconstrainedError') throw error;
+    return navigator.mediaDevices.getUserMedia({ video: { deviceId }, audio: false });
   }
-
-  // Nothing opened, or Windows picked the IR camera: try real cameras first.
-  const currentId = track && track.getSettings ? track.getSettings().deviceId : null;
-  const ordered = cams.filter(d => !_isIrCamera(d.label)).concat(cams.filter(d => _isIrCamera(d.label)));
-  for (const d of ordered) {
-    if (d.deviceId && d.deviceId === currentId) continue;
-    const s = await tryOpen({ ...ideal, deviceId: { exact: d.deviceId } })
-           || await tryOpen({ deviceId: { exact: d.deviceId } });
-    if (s) {
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      console.log('[Stream] using camera: ' + d.label);
-      return s;
-    }
-  }
-  if (stream) return stream;
-  throw lastErr || Object.assign(new Error('No camera found'), { name: 'NotFoundError' });
 }
 
 // ── DOM refs ─────────────────────────────────────────────────────────────────
 const startBtn       = document.getElementById('startBtn');
+const cameraSelect   = document.getElementById('cameraSelect');
+const findCamerasBtn = document.getElementById('findCamerasBtn');
+const cameraHint     = document.getElementById('cameraHint');
 const stopBtn        = document.getElementById('stopBtn');
 const applyFaceBtn   = document.getElementById('applyFaceBtn');
 const obsBtn         = document.getElementById('obsBtn');
@@ -2173,6 +2163,62 @@ const errMsg         = document.getElementById('errMsg');
 const stoppedOverlay = document.getElementById('stoppedOverlay');
 const hudTime        = document.getElementById('hudTime');
 const hudCredits     = document.getElementById('hudCredits');
+
+function setCameraControlsBusy(busy) {
+  findCamerasBtn.disabled = busy;
+  cameraSelect.disabled = busy || cameraSelect.options.length <= 1;
+  startBtn.disabled = busy || !cameraSelect.value;
+}
+
+async function refreshCameras(requestAccess) {
+  setCameraControlsBusy(true);
+  cameraHint.hidden = true;
+  const selected = cameraSelect.value;
+  let probe;
+  try {
+    let cameras = await listCameras();
+    if (requestAccess && (!cameras.length || cameras.some(camera => !camera.label))) {
+      probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      cameras = await listCameras();
+    }
+    cameraSelect.options.length = 1;
+    cameras.forEach((camera, index) => {
+      cameraSelect.add(new Option(camera.label || 'Camera ' + (index + 1), camera.deviceId));
+    });
+    cameraSelect.value = cameras.some(camera => camera.deviceId === selected) ? selected : '';
+    findCamerasBtn.textContent = cameras.length ? 'Refresh cameras' : 'Find cameras';
+    if (requestAccess && !cameras.length) {
+      cameraHint.textContent = 'No cameras found. Connect or enable a camera and try again.';
+      cameraHint.hidden = false;
+    }
+  } catch (error) {
+    if (requestAccess) {
+      cameraHint.textContent = cameraErrorMessage(error);
+      cameraHint.hidden = false;
+    }
+  } finally {
+    probe?.getTracks().forEach(track => track.stop());
+    setCameraControlsBusy(false);
+  }
+}
+
+function cameraErrorMessage(error) {
+  switch (error.name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return IS_WINDOWS
+        ? 'Allow desktop apps to access your camera in Settings → Privacy & security → Camera.'
+        : 'Allow RealFaceAI to access your camera in System Settings → Privacy & Security → Camera.';
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return 'The camera is unavailable. Refresh the camera list and choose an available camera.';
+    case 'NotReadableError':
+    case 'AbortError':
+      return 'Could not open the camera. Close other apps using it, then try again.';
+    default:
+      return 'Could not access cameras. Check your camera connection and permissions.';
+  }
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let localStream  = null;   // our camera MediaStream (we own its tracks)
@@ -2284,7 +2330,7 @@ function showError(msg) {
   errMsg.textContent = msg;
   errOverlay.classList.add('show');
   setStatus('Error — see details above');
-  startBtn.disabled = false;
+  setCameraControlsBusy(false);
   stopBtn.disabled  = true;
   if (window._hudTimerInterval) { clearInterval(window._hudTimerInterval); window._hudTimerInterval = null; }
   hudTime.textContent = '--:--';
@@ -2412,19 +2458,31 @@ function onFirstOutput() {
 
 // ── START ─────────────────────────────────────────────────────────────────────
 window.startStream = async function() {
+  if (startBtn.disabled) return;
+  const cameraId = cameraSelect.value;
   errOverlay.classList.remove('show');
-  startBtn.disabled = true;
+  cameraHint.hidden = true;
+  setCameraControlsBusy(true);
   _sessionStarted = false;
   setStatus('Requesting camera…');
 
+  const fmt = pickFormat();
   try {
-    const fmt = pickFormat();
-    localStream = await openCamera(fmt.fps || 30, fmt.width, fmt.height);
+    localStream = await openCamera(cameraId, fmt);
+  } catch (error) {
+    console.warn('[Stream] camera failed:', error);
+    cameraHint.textContent = cameraErrorMessage(error);
+    cameraHint.hidden = false;
+    setStatus('Camera unavailable');
+    setCameraControlsBusy(false);
+    return;
+  }
+
+  try {
     localVideo.srcObject = localStream;
     localPh.style.display = 'none';
 
-    // The SDK takes our camera track as-is (openCamera keeps its IR-camera
-    // handling); tell it the size the camera actually delivers.
+    // Tell the SDK the size the selected camera actually delivers.
     const track = localStream.getVideoTracks()[0];
     const cam = (track.getSettings && track.getSettings()) || {};
     const videoFormat = new RealtimeVideoFormat({
@@ -2474,20 +2532,7 @@ window.startStream = async function() {
     localStream?.getTracks().forEach(t => t.stop());
     localStream = null;
     if (handled) return;   // onState already reported this failure
-    let friendly = (err && err.message) ? err.message : String(err);
-    const name = (err && err.name) || '';
-    if (name === 'NotAllowedError' || friendly.includes('Permission denied') || friendly.includes('NotAllowedError')) {
-      friendly = IS_WINDOWS
-        ? 'Camera access was denied. In Windows Settings → Privacy & security → Camera, turn on camera access and allow desktop apps to access your camera.'
-        : 'Camera access was denied. Please allow camera access and try again.';
-    } else if (name === 'NotFoundError' || friendly.includes('NotFoundError') || friendly.includes('DevicesNotFound')) {
-      friendly = 'No camera found. Please connect a webcam and try again.';
-    } else if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
-      friendly = 'Your camera is busy. Another app is using it (e.g. Zoom, Teams, OBS virtual camera, HP camera software). Close it and try again.';
-    } else if (err && err.code) {
-      friendly = friendlySdkError(err);
-    }
-    showError(friendly);
+    showError(err?.code ? friendlySdkError(err) : (err?.message || String(err)));
   }
 };
 
@@ -2533,7 +2578,6 @@ window.stopStream = function(reason) {
   remotePh.style.display = '';
 
   applyFaceBtn.classList.remove('visible');
-  startBtn.disabled = false;
   stopBtn.disabled  = true;
   setStatus('Stopped');
 
@@ -2566,6 +2610,9 @@ window.goBack = function() {
   notifyApp('onGoBack');
 };
 startBtn.addEventListener('click', window.startStream);
+cameraSelect.addEventListener('change', () => setCameraControlsBusy(false));
+findCamerasBtn.addEventListener('click', () => refreshCameras(true));
+refreshCameras(false);
 stopBtn.addEventListener('click', window.stopStream);
 document.getElementById('retryBtn').addEventListener('click', window.retryStream);
 applyFaceBtn.addEventListener('click', window.applyFace);
