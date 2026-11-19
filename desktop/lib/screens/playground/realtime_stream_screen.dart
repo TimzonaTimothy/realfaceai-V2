@@ -2565,7 +2565,14 @@ window.goBack = function() {
   localStream = null;
   notifyApp('onGoBack');
 };
-document.getElementById('goBackBtn').addEventListener('click', goBack);
+startBtn.addEventListener('click', window.startStream);
+stopBtn.addEventListener('click', window.stopStream);
+document.getElementById('retryBtn').addEventListener('click', window.retryStream);
+applyFaceBtn.addEventListener('click', window.applyFace);
+obsBtn.addEventListener('click', window.toggleObs);
+document.getElementById('obsCopyBtn').addEventListener('click', window.copyObsUrl);
+document.getElementById('backBtn').addEventListener('click', window.goBack);
+document.getElementById('goBackBtn').addEventListener('click', window.goBack);
 
 // Show initial credits if available at page load
 const _initCr = '$initCredits';
