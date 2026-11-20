@@ -89,7 +89,6 @@ flutter build windows --release
 ```
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-Windows streaming uses the native Xmax Windows SDK with the X2.1 model.
-The first Windows build downloads the pinned x64 SDK from GitHub and checks
-its SHA-256 hash. The runtime libraries are included in the Flutter release
-folder and the Inno Setup installer.
+Windows streaming uses the WebView2 Runtime installed on the PC. If the runtime
+is missing, select **Download WebView2** on the streaming screen, install it
+from Microsoft, then select **Try again**.
