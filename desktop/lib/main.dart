@@ -408,8 +408,8 @@ class _RealFaceAIAppState extends State<RealFaceAIApp> {
           builder: (context, state) {
             final extra = state.extra as Map<String, dynamic>? ?? {};
             // The model comes from the backend, not from here.
-            // Phones: native Xmax SDK. Desktop: WebView + Xmax web SDK (the
-            // native Flutter SDK is iOS/Android only).
+            // Mobile uses the Xmax Flutter SDK. The desktop screen uses
+            // the Xmax Windows SDK on Windows and the web SDK on macOS.
             if (Platform.isIOS || Platform.isAndroid) {
               return NativeStreamScreen(
                 prompt: extra['prompt'] as String?,

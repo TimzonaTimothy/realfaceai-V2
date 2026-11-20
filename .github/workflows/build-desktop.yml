@@ -67,17 +67,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
-      - name: Download WebView2 Evergreen Standalone Installer
-        shell: pwsh
-        run: |
-          $installer = 'installer\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
-          Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile $installer
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($signature.Status -ne 'Valid' -or
-              $signature.SignerCertificate.GetNameInfo('SimpleName', $false) -ne 'Microsoft Corporation') {
-            throw 'The WebView2 installer does not have a valid Microsoft signature.'
-          }
-
       # Before MSIX: msix writes its .msix into the Release folder, and the
       # installer packs that whole folder.
       - name: Compile installer
