@@ -79,14 +79,19 @@ Your installer will be generated in `build\windows\x64\runner\Release\`.
 
 
 
-<!-- using inno best  -->
-# 1. Build Flutter release
+## Build the Inno Setup installer
+
+Download Microsoft's [Evergreen Standalone Installer (x64)](https://go.microsoft.com/fwlink/?linkid=2124701)
+and save it as `desktop\installer\MicrosoftEdgeWebView2RuntimeInstallerX64.exe`.
+The Windows CI build downloads it automatically.
+
+Run these commands in PowerShell from the `desktop` directory:
+
+```powershell
 flutter build windows --release
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" .\installer.iss
+```
 
-flutter pub run msix:create
-
-# 2. Compile the installer (adjust path to ISCC.exe)
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-
-# 3. Output is at: installer_output/RealFaceAI-Setup-1.0.2.exe (~25MB)
-# Upload THIS file to your server's downloads/ folder
+The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
+It includes the full offline WebView2 runtime installer and runs it when the
+machine-wide runtime is missing, so the download is larger than a bootstrapper build.

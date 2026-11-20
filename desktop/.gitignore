@@ -12,6 +12,7 @@
 .swiftpm/
 migrate_working_dir/
 .installer_output/
+/installer/MicrosoftEdgeWebView2RuntimeInstallerX64.exe
 
 # IntelliJ related
 *.iml
