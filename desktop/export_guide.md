@@ -81,10 +81,6 @@ Your installer will be generated in `build\windows\x64\runner\Release\`.
 
 ## Build the Inno Setup installer
 
-Download Microsoft's [Evergreen Standalone Installer (x64)](https://go.microsoft.com/fwlink/?linkid=2124701)
-and save it as `desktop\installer\MicrosoftEdgeWebView2RuntimeInstallerX64.exe`.
-The Windows CI build downloads it automatically.
-
 Run these commands in PowerShell from the `desktop` directory:
 
 ```powershell
@@ -93,5 +89,7 @@ flutter build windows --release
 ```
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-It includes the full offline WebView2 runtime installer and runs it when the
-machine-wide runtime is missing, so the download is larger than a bootstrapper build.
+Windows streaming uses the native Xmax Windows SDK with the X2.1 model.
+The first Windows build downloads the pinned x64 SDK from GitHub and checks
+its SHA-256 hash. The runtime libraries are included in the Flutter release
+folder and the Inno Setup installer.

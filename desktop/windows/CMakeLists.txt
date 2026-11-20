@@ -111,3 +111,25 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
 
+
+# Pin Xmax to the tested Windows x64 package, including its runtime dependencies.
+include(FetchContent)
+FetchContent_Declare(xmax_windows
+  URL "https://github.com/Xmax-AI/XmaxSDK-Windows/releases/download/1.1.2/XmaxSDK-1.1.2-windows-x64.zip"
+  URL_HASH SHA256=16334cb5901aab476e2826c2b36792bb98bfa7e03c4fa93617ba257da606d9b3
+)
+FetchContent_GetProperties(xmax_windows)
+if(NOT xmax_windows_POPULATED)
+  FetchContent_Populate(xmax_windows)
+endif()
+find_package(XmaxSDK 1.1.2 EXACT CONFIG REQUIRED
+  PATHS "${xmax_windows_SOURCE_DIR}" NO_DEFAULT_PATH)
+add_library(realface_xmax SHARED runner/xmax_bridge.cpp)
+target_compile_features(realface_xmax PRIVATE cxx_std_17)
+target_compile_definitions(realface_xmax PRIVATE NOMINMAX)
+target_link_libraries(realface_xmax PRIVATE Xmax::SDK windowscodecs ole32)
+install(TARGETS realface_xmax RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
+install(DIRECTORY "${xmax_windows_SOURCE_DIR}/bin/"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime
+  FILES_MATCHING PATTERN "*.dll" PATTERN "Xmax.VideoBeautyWorker.exe")
