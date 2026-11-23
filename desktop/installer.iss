@@ -1,6 +1,6 @@
 ; CI passes the version: ISCC.exe /DAppVer=1.1.0 installer.iss
 #ifndef AppVer
-  #define AppVer "1.0.5"
+  #define AppVer "1.0.0"
 #endif
 
 [Setup]
