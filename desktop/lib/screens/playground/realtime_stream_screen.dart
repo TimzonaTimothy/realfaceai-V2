@@ -1469,10 +1469,11 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Heartbeat (deducts credits on backend every 10 s) ─────────────────────
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
+    _heartbeatTimer =
+        Timer.periodic(const Duration(seconds: 10), (timer) async {
       try {
         final result = await ApiService.instance.streamHeartbeat();
-        if (!mounted) return;
+        if (!mounted || timer != _heartbeatTimer) return;
         // Stop on: out of credits (402), account frozen/suspended (403) or
         // build no longer supported (426). The server sends stop:true in all
         // of these; the status check is a belt-and-braces fallback.
@@ -1513,27 +1514,18 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       ? null
       : '${_creditsRemaining!.toStringAsFixed(0)} cr';
 
-  String? get _remainText {
-    if (_creditsRemaining == null) return null;
-    final remainSecs = (_creditsPerSecond > 0)
-        ? (_creditsRemaining! / _creditsPerSecond).floor()
-        : 0;
-    final rm = (remainSecs ~/ 60).toString().padLeft(2, '0');
-    final rs = (remainSecs % 60).toString().padLeft(2, '0');
-    return '$rm:$rs';
+  int? get _remainingSeconds {
+    final credits = _creditsRemaining;
+    if (credits == null) return null;
+    if (credits <= 0 || _creditsPerSecond <= 0) return 0;
+    return (credits / _creditsPerSecond).floor();
   }
 
-  /// Push updated credits + estimated remaining time into the live WebView.
   void _pushCreditsUpdate() {
-    if (_webViewController == null || _creditsRemaining == null) return;
-    _webViewController!.evaluateJavascript(source: """
-      (function() {
-        var c = document.getElementById('hudCredits');
-        var r = document.getElementById('hudRemain');
-        if (c) { c.textContent = '$_creditsText'; c.style.display = ''; }
-        if (r) { r.textContent = '$_remainText'; r.style.display = ''; }
-      })();
-    """);
+    if (_creditsRemaining == null) return;
+    _webViewController?.evaluateJavascript(
+        source:
+            'window.updateStreamCredits?.(${jsonEncode(_creditsText)}, ${jsonEncode(_remainingSeconds)});');
   }
 
   void _onPageStarted() {
@@ -1542,25 +1534,28 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     _pushCreditsUpdate();
   }
 
-  /// Stream stopped in the page: stop billing and fetch a fresh token so the
-  /// next START gets a new session (the reloaded page bakes it in).
-  Future<void> _onPageStopped() async {
-    _stopHeartbeat();
+  /// An explicit retry needs a fresh token for the reloaded page.
+  Future<void> _refreshStreamForRetry() async {
     if (!mounted) return;
     try {
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
       );
-      if (result['statusCode'] == 200) {
+      if (mounted && result['statusCode'] == 200) {
         _applyStreamConfig(result);
         _streamToken = result['token'] as String;
+        _creditsRemaining = (result['credits_remaining'] as num?)?.toDouble();
+        _creditsPerSecond =
+            (result['credits_per_second'] as num?)?.toDouble() ?? 2.0;
+        if (_creditsRemaining case final credits?) {
+          context.read<AuthProvider>().updateCredits(credits);
+        }
       }
     } catch (_) {}
   }
 
   void _onPageBack() {
     _stopHeartbeat();
-    _server?.close(force: true);
     if (mounted) context.go('/playground');
   }
 
@@ -1817,8 +1812,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     final windowsJs = Platform.isWindows ? 'true' : 'false';
     final preferredCamera = _escape(_preferredCameraLabel);
     final sdkVersion = _sdkVersion;
-    final initCredits =
-        _creditsRemaining != null ? _creditsRemaining!.toStringAsFixed(1) : '';
+    final initialCredits = jsonEncode(_creditsText);
+    final initialRemainingSeconds = jsonEncode(_remainingSeconds);
     final logoHtml = _logoBase64.isNotEmpty
         ? '<img src="data:image/png;base64,$_logoBase64" alt="RealFaceAI" class="logo-img">'
         : '<span class="logo-text">RealFace<em>AI</em></span>';
@@ -2514,6 +2509,28 @@ function onState(state) {
   }
 }
 
+const remainingDisplay = document.getElementById('hudRemain');
+let remainingSeconds = null;
+let remainingSince = 0;
+
+function formatSessionTime(seconds) {
+  const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
+  return minutes + ':' + String(seconds % 60).padStart(2, '0');
+}
+
+function renderRemainingTime() {
+  const elapsed = _sessionStarted ? Math.floor((performance.now() - remainingSince) / 1000) : 0;
+  remainingDisplay.textContent = remainingSeconds === null
+      ? '—' : formatSessionTime(Math.max(0, remainingSeconds - elapsed));
+}
+
+window.updateStreamCredits = function(credits, seconds) {
+  hudCredits.textContent = credits ?? '—';
+  remainingSeconds = seconds;
+  remainingSince = performance.now();
+  renderRemainingTime();
+};
+
 // First AI frame is on screen: start the clock, billing and OBS.
 function onFirstOutput() {
   _sessionStarted = true;
@@ -2525,13 +2542,13 @@ function onFirstOutput() {
   // Elapsed timer — runs entirely in JS, no Dart round-trip needed
   hudTime.style.display = '';
   hudTime.textContent = '00:00';
-  let _elapsed = 0;
+  const startedAt = performance.now();
+  remainingSince = startedAt;
+  renderRemainingTime();
   if (window._hudTimerInterval) clearInterval(window._hudTimerInterval);
   window._hudTimerInterval = setInterval(() => {
-    _elapsed++;
-    const m = String(Math.floor(_elapsed / 60)).padStart(2, '0');
-    const s = String(_elapsed % 60).padStart(2, '0');
-    hudTime.textContent = m + ':' + s;
+    hudTime.textContent = formatSessionTime(Math.floor((performance.now() - startedAt) / 1000));
+    renderRemainingTime();
   }, 1000);
 
   if (FACE_URL && FACE_URL.length > 0) applyFaceBtn.classList.add('visible');
@@ -2667,8 +2684,8 @@ window.stopStream = function(reason) {
 
   if (window._hudTimerInterval) { clearInterval(window._hudTimerInterval); window._hudTimerInterval = null; }
   hudTime.textContent = '--:--';
-  const hudR = document.getElementById('hudRemain');
-  if (hudR) hudR.textContent = '—';
+  remainingSeconds = null;
+  renderRemainingTime();
 
   stoppedOverlay.classList.add('show');
 
@@ -2676,8 +2693,11 @@ window.stopStream = function(reason) {
 };
 
 window.retryStream = function() {
-  errOverlay.classList.remove('show');
-  notifyApp('onStreamStopped');
+  const retryButton = document.getElementById('retryBtn');
+  retryButton.disabled = true;
+  Promise.resolve(notifyApp('onStreamRetry')).finally(() => {
+    retryButton.disabled = false;
+  });
 };
 
 window.applyFace = async function() {
@@ -2688,10 +2708,13 @@ window.applyFace = async function() {
 };
 
 window.goBack = function() {
-  teardownSession();
-  localStream?.getTracks().forEach(t => t.stop());
-  localStream = null;
-  notifyApp('onGoBack');
+  try {
+    teardownSession();
+  } finally {
+    localStream?.getTracks().forEach(t => t.stop());
+    localStream = null;
+    notifyApp('onGoBack');
+  }
 };
 startBtn.addEventListener('click', window.startStream);
 cameraSelect.addEventListener('change', () => {
@@ -2708,12 +2731,7 @@ document.getElementById('obsCopyBtn').addEventListener('click', window.copyObsUr
 document.getElementById('backBtn').addEventListener('click', window.goBack);
 document.getElementById('goBackBtn').addEventListener('click', window.goBack);
 
-// Show initial credits if available at page load
-const _initCr = '$initCredits';
-if (_initCr && _initCr !== 'null' && _initCr !== '') {
-  hudCredits.textContent   = _initCr + ' credits';
-  hudCredits.style.display = '';
-}
+window.updateStreamCredits($initialCredits, $initialRemainingSeconds);
 </script>
 
 <!-- If the SDK module fails to load (missing/broken rt.js, import error), none
@@ -2826,8 +2844,14 @@ window.addEventListener('load', function() {
 
                 controller.addJavaScriptHandler(
                   handlerName: 'onStreamStopped',
+                  callback: (_) => _stopHeartbeat(),
+                );
+
+                controller.addJavaScriptHandler(
+                  handlerName: 'onStreamRetry',
                   callback: (_) async {
-                    await _onPageStopped();
+                    _stopHeartbeat();
+                    await _refreshStreamForRetry();
                     // Reload the WebView — new token will be baked into fresh HTML
                     if (mounted && _phase == _Phase.ready) {
                       await controller.reload();
