@@ -15,6 +15,10 @@ OutputBaseFilename=RealFaceAI-Setup-{#AppVer}
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64
+#ifdef UseAzureArtifactSigning
+SignTool=AzureArtifactSigning
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "build\windows\x64\runner\Release\*"; \

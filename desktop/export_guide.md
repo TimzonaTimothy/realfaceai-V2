@@ -96,3 +96,29 @@ Open the streaming screen and wait for the camera preview before selecting
 **Start stream**. When generated video is live, select **Open AI Output**.
 In OBS, add a **Window Capture** source and choose **RealFaceAI AI Output**.
 This separate window displays only generated video.
+
+### Build a signed installer for direct downloads
+
+Set up an [Azure Artifact Signing Public Trust profile](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)
+and grant your Azure identity the **Artifact Signing Certificate Profile Signer**
+role. Install the matching x64 SignTool and signing DLL, then create
+`metadata.json` using your account endpoint, account name, and certificate profile.
+Follow [Microsoft’s SignTool integration guide](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)
+for the tool locations and metadata format.
+
+Run from `desktop` in PowerShell on Windows, substituting your paths and release version:
+
+```powershell
+az login
+.uild-signed-installer.ps1 `
+  -SignToolPath 'C:\path\to\signtool.exe' `
+  -SigningDlibPath 'C:\path\to\Azure.CodeSigning.Dlib.dll' `
+  -MetadataPath 'C:\path\to\metadata.json' `
+  -Version '1.0.0'
+```
+
+The script builds Flutter, signs the app and unsigned bundled executables and DLLs,
+and tells Inno Setup to sign both Setup and its uninstaller. It verifies the
+timestamped installer before printing the path to upload. Existing valid
+third-party signatures are preserved. The two-command development build above
+continues to produce an unsigned installer.
