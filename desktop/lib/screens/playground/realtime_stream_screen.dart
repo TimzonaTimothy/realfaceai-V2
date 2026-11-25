@@ -1543,7 +1543,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         _resultTexture = live ? result : null;
       });
       frameClock.reset();
-      var lastObsAt = -100;
+      var lastObsAt = -32;
       while (mounted && _windowsRunning) {
         final tick = frameClock.elapsedMilliseconds;
         final changed = pollWindowsXmax(handle);
@@ -1560,10 +1560,14 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
             setState(() => _nativeLive = true);
           }
           outputClock.reset();
-          if (_sendToObs && obs == null && tick - lastObsAt >= 100) {
-            lastObsAt = tick;
-            obs = _sendNativeObsFrame(handle).whenComplete(() => obs = null);
-          }
+        }
+        if (_nativeLive &&
+            _sendToObs &&
+            _sseClients.isNotEmpty &&
+            obs == null &&
+            tick - lastObsAt >= 32) {
+          lastObsAt = tick;
+          obs = _sendNativeObsFrame(handle).whenComplete(() => obs = null);
         }
         final seconds = _nativeCreditClock.elapsed.inSeconds;
         if (_nativeLive && seconds != reportedSecond) {
@@ -1578,7 +1582,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           throw StateError(
               'No camera video arrived. Check the selected camera and try again.');
         }
-        await Future<void>.delayed(const Duration(milliseconds: 32));
+        await Future<void>.delayed(const Duration(milliseconds: 16));
       }
     } catch (error) {
       if (mounted && _windowsRunning) {
@@ -1989,6 +1993,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       // ── MJPEG stream — OBS Browser Source holds this connection open ───────
       case '/stream':
         req.response
+          ..bufferOutput = !Platform.isWindows
           ..statusCode = 200
           ..headers
               .set('Content-Type', 'multipart/x-mixed-replace; boundary=frame')

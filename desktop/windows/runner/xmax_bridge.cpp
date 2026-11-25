@@ -190,13 +190,21 @@ std::shared_ptr<Pixels> ConvertFrame(const xmax::frame& frame) {
 }
 
 std::vector<uint8_t> EncodeJpeg(const Pixels& frame) {
-  const auto width = static_cast<UINT>(frame.width);
-  const auto height = static_cast<UINT>(frame.height);
-  std::vector<uint8_t> pixels(frame.width * frame.height * 3);
-  for (size_t i = 0; i < frame.width * frame.height; ++i) {
-    pixels[i * 3] = frame.rgba[i * 4 + 2];
-    pixels[i * 3 + 1] = frame.rgba[i * 4 + 1];
-    pixels[i * 3 + 2] = frame.rgba[i * 4];
+  // OBS gets an up-to-720p feed. Keep the in-app texture at its original size.
+  const double scale = std::min(
+      {1.0, 1280.0 / frame.width, 720.0 / frame.height});
+  const auto width = std::max(1u, static_cast<UINT>(frame.width * scale));
+  const auto height = std::max(1u, static_cast<UINT>(frame.height * scale));
+  std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
+  for (UINT y = 0; y < height; ++y) {
+    const auto source_row = (y * frame.height / height) * frame.width;
+    for (UINT x = 0; x < width; ++x) {
+      const auto source = (source_row + x * frame.width / width) * 4;
+      const auto target = (static_cast<size_t>(y) * width + x) * 3;
+      pixels[target] = frame.rgba[source + 2];
+      pixels[target + 1] = frame.rgba[source + 1];
+      pixels[target + 2] = frame.rgba[source];
+    }
   }
   ComPtr<IWICImagingFactory> factory;
   Check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
