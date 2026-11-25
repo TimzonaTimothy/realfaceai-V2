@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:isolate';
-import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
@@ -13,10 +12,8 @@ final _start = _bridge.lookupFunction<
     Pointer<Void> Function(Pointer<Utf8>, Pointer<Utf8>, Pointer<Utf8>,
         Pointer<Utf8>, Pointer<Utf8>, int)>('realface_xmax_start');
 
-final _obsFrame = _bridge.lookupFunction<
-    Pointer<Uint8> Function(Pointer<Void>, Pointer<Int32>),
-    Pointer<Uint8> Function(
-        Pointer<Void>, Pointer<Int32>)>('realface_xmax_obs_frame');
+final _openOutput = _bridge.lookupFunction<Void Function(Pointer<Void>),
+    void Function(Pointer<Void>)>('realface_xmax_open_output');
 
 final _poll = _bridge.lookupFunction<Int32 Function(Pointer<Void>),
     int Function(Pointer<Void>)>('realface_xmax_poll');
@@ -80,15 +77,8 @@ int pollWindowsXmax(int address) {
   return updated;
 }
 
-Future<Uint8List?> readWindowsObsFrame(int address) =>
-    Isolate.run(() => using((arena) {
-          final length = arena<Int32>();
-          final bytes = _obsFrame(Pointer<Void>.fromAddress(address), length);
-          if (length.value < 0) throw StateError('Could not encode OBS video.');
-          return bytes == nullptr
-              ? null
-              : Uint8List.fromList(bytes.asTypedList(length.value));
-        }));
+void openWindowsXmaxOutput(int address) =>
+    _openOutput(Pointer<Void>.fromAddress(address));
 
 Future<void> stopWindowsXmax(int address) =>
     Isolate.run(() => _stop(Pointer<Void>.fromAddress(address)));

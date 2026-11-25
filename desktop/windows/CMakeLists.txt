@@ -126,7 +126,7 @@ find_package(XmaxSDK 1.1.2 EXACT CONFIG REQUIRED
 add_library(realface_xmax SHARED runner/xmax_bridge.cpp)
 target_compile_features(realface_xmax PRIVATE cxx_std_17)
 target_compile_definitions(realface_xmax PRIVATE NOMINMAX)
-target_link_libraries(realface_xmax PRIVATE flutter Xmax::SDK windowscodecs ole32)
+target_link_libraries(realface_xmax PRIVATE flutter Xmax::SDK user32 gdi32 ole32)
 target_link_libraries(${BINARY_NAME} PRIVATE realface_xmax)
 install(TARGETS realface_xmax RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)

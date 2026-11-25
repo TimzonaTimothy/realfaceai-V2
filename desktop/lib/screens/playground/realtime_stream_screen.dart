@@ -1297,7 +1297,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   bool _previewReady = false;
   bool _nativeLive = false;
   bool _changingCamera = false;
-  bool _sendToObs = false;
+  int? _windowsOutputSession;
   String _windowsCamera = '';
   Map<String, String> _windowsCameras = {};
   int? _cameraTexture;
@@ -1412,8 +1412,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       try {
         final cameras = await listWindowsXmaxCameras();
         if (!mounted) return;
-        await _startServer();
-        if (!mounted) return;
         setState(() {
           _windowsCameras = cameras;
           _phase = _Phase.ready;
@@ -1502,7 +1500,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   Future<void> _runWindowsSession({required bool live}) async {
     _windowsRunning = true;
     int? session;
-    Future<void>? obs;
     final frameClock = Stopwatch()..start();
     final outputClock = Stopwatch()..start();
     var reportedSecond = -1;
@@ -1541,11 +1538,10 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       setState(() {
         _cameraTexture = camera;
         _resultTexture = live ? result : null;
+        _windowsOutputSession = live ? handle : null;
       });
       frameClock.reset();
-      var lastObsAt = -32;
       while (mounted && _windowsRunning) {
-        final tick = frameClock.elapsedMilliseconds;
         final changed = pollWindowsXmax(handle);
         if (!mounted || !_windowsRunning) break;
         if (changed & 1 != 0 && !_previewReady) {
@@ -1561,13 +1557,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           }
           outputClock.reset();
         }
-        if (_nativeLive &&
-            _sendToObs &&
-            _sseClients.isNotEmpty &&
-            obs == null &&
-            tick - lastObsAt >= 32) {
-          lastObsAt = tick;
-          obs = _sendNativeObsFrame(handle).whenComplete(() => obs = null);
+        if (changed & 4 != 0) {
+          setState(() => _error = 'Could not display the AI Output window.');
         }
         final seconds = _nativeCreditClock.elapsed.inSeconds;
         if (_nativeLive && seconds != reportedSecond) {
@@ -1599,10 +1590,10 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           _nativeLive = false;
           _cameraTexture = null;
           _resultTexture = null;
+          _windowsOutputSession = null;
         });
       }
       try {
-        await obs;
         if (session != null) await stopWindowsXmax(session);
       } finally {
         _windowsTask = null;
@@ -1612,17 +1603,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           });
         }
       }
-    }
-  }
-
-  Future<void> _sendNativeObsFrame(int handle) async {
-    try {
-      final bytes = await readWindowsObsFrame(handle);
-      if (mounted && _windowsRunning && _sendToObs && bytes != null) {
-        await _publishObsFrame(bytes);
-      }
-    } catch (error) {
-      debugPrint('[RealtimeScreen] Native OBS frame failed: $error');
     }
   }
 
@@ -1695,18 +1675,16 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
                     ? null
                     : _selectWindowsCamera,
               ),
-              FilterChip(
-                label: const Text('Send output to OBS'),
-                selected: _sendToObs,
-                onSelected: (enabled) => setState(() => _sendToObs = enabled),
+              OutlinedButton(
+                onPressed: _nativeLive && _windowsRunning
+                    ? () {
+                        if (_windowsOutputSession case final session?) {
+                          openWindowsXmaxOutput(session);
+                        }
+                      }
+                    : null,
+                child: const Text('Open AI Output'),
               ),
-              if (_sendToObs)
-                OutlinedButton(
-                  onPressed: () => Clipboard.setData(
-                    ClipboardData(text: 'http://127.0.0.1:$_port/popout'),
-                  ),
-                  child: const Text('Copy OBS URL'),
-                ),
               if (_creditsText case final credits?) Text(credits),
               if (_nativeLive && _remainingSeconds != null)
                 Text('Time left: $_nativeTimeLeft'),
@@ -1874,25 +1852,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     server.listen(_handleRequest);
   }
 
-  Future<void> _publishObsFrame(List<int> frame) async {
-    _latestFrameBytes = frame;
-    final clients = List<HttpResponse>.of(_sseClients);
-    await Future.wait(clients.map((client) async {
-      try {
-        client
-          ..write('--frame\r\n')
-          ..write('Content-Type: image/jpeg\r\n')
-          ..write('Content-Length: ${frame.length}\r\n\r\n')
-          ..add(frame)
-          ..write('\r\n');
-        await client.flush().timeout(const Duration(milliseconds: 500));
-      } catch (_) {
-        _sseClients.remove(client);
-        unawaited(client.close().then<void>((_) {}, onError: (Object _) {}));
-      }
-    }));
-  }
-
   Future<void> _handleRequest(HttpRequest req) async {
     final path = req.uri.path;
 
@@ -1955,7 +1914,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
       // ── JS POSTs raw binary JPEG frames here — fanned to MJPEG clients ────
       case '/push':
-        if (Platform.isWindows || req.method != 'POST') {
+        if (req.method != 'POST') {
           req.response
             ..statusCode = 405
             ..close();
@@ -1993,7 +1952,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       // ── MJPEG stream — OBS Browser Source holds this connection open ───────
       case '/stream':
         req.response
-          ..bufferOutput = !Platform.isWindows
           ..statusCode = 200
           ..headers
               .set('Content-Type', 'multipart/x-mixed-replace; boundary=frame')

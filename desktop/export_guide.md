@@ -93,5 +93,6 @@ This Windows test build uses native Xmax X2.1 streaming. The first build
 downloads the pinned Windows SDK from GitHub and verifies its SHA-256 hash.
 
 Open the streaming screen and wait for the camera preview before selecting
-**Start stream**. To test OBS, enable **Send output to OBS** and paste the
-copied URL into an OBS Browser Source.
+**Start stream**. When generated video is live, select **Open AI Output**.
+In OBS, add a **Window Capture** source and choose **RealFaceAI AI Output**.
+This separate window displays only generated video.

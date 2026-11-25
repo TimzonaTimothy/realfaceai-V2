@@ -1,6 +1,4 @@
 #include <windows.h>
-#include <wincodec.h>
-#include <wrl/client.h>
 
 #include <flutter_windows.h>
 
@@ -18,8 +16,6 @@
 #include <vector>
 
 #include <xmax/xmax.hpp>
-
-using Microsoft::WRL::ComPtr;
 
 namespace {
 
@@ -113,6 +109,7 @@ struct Session {
     running.store(false);
     if (frame_thread.joinable()) frame_thread.join();
     if (generation_thread.joinable()) generation_thread.join();
+    if (output_thread.joinable()) output_thread.join();
     try {
       realtime.close();
     } catch (const std::exception&) {
@@ -128,20 +125,86 @@ struct Session {
   int64_t timestamps[2] = {-1, -1};
   Texture local_texture = NewTexture();
   Texture remote_texture = NewTexture();
-  std::mutex obs_mutex;
-  std::shared_ptr<const Pixels> obs_frame;
-  int64_t obs_timestamp = -1;
-  int64_t encoded_timestamp = -1;
-  std::vector<uint8_t> jpeg;
+  std::mutex output_mutex;
+  std::shared_ptr<const xmax::frame> output_frame;
+  std::atomic<bool> show_output{false};
+  std::atomic<bool> output_failed{false};
   std::atomic<bool> running{true};
   std::atomic<int> frame_updates{0};
   std::atomic<bool> generation_failed{false};
   std::thread frame_thread;
   std::thread generation_thread;
+  std::thread output_thread;
 };
 
-void Check(HRESULT result) {
-  if (FAILED(result)) throw std::runtime_error("Windows JPEG encoding failed.");
+HWND CreateOutputWindow() {
+  const auto instance = GetModuleHandleW(nullptr);
+  constexpr wchar_t window_class[] = L"RealFaceAIOutputWindow";
+  WNDCLASSW options{};
+  options.lpfnWndProc = DefWindowProcW;
+  options.hInstance = instance;
+  options.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  options.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+  options.lpszClassName = window_class;
+  if (!RegisterClassW(&options) &&
+      GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+    return nullptr;
+  }
+
+  return CreateWindowExW(0, window_class, L"RealFaceAI AI Output",
+                        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                        960, 580, nullptr, nullptr, instance, nullptr);
+}
+
+void RunOutputWindow(Session* session) {
+  Apartment apartment;
+  HWND window = nullptr;
+  std::weak_ptr<const xmax::frame> displayed;
+  RECT last_client{};
+  while (session->running.load()) {
+    MSG message{};
+    while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+    if (window && !IsWindow(window)) {
+      window = nullptr;
+      displayed.reset();
+    }
+    if (session->show_output.exchange(false)) {
+      if (!window) window = CreateOutputWindow();
+      if (window) {
+        ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+        SetForegroundWindow(window);
+        displayed.reset();
+      } else {
+        session->output_failed.store(true);
+      }
+    }
+    if (window && !IsIconic(window)) {
+      std::shared_ptr<const xmax::frame> frame;
+      {
+        std::lock_guard<std::mutex> lock(session->output_mutex);
+        frame = session->output_frame;
+      }
+      RECT client{};
+      GetClientRect(window, &client);
+      if (frame && (frame != displayed.lock() ||
+                    !EqualRect(&client, &last_client))) {
+        try {
+          frame->render_window(window);
+          displayed = frame;
+          last_client = client;
+        } catch (const std::exception&) {
+          session->output_failed.store(true);
+          DestroyWindow(window);
+          window = nullptr;
+        }
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(16));
+  }
+  if (window) DestroyWindow(window);
 }
 
 std::shared_ptr<Pixels> ConvertFrame(const xmax::frame& frame) {
@@ -189,59 +252,6 @@ std::shared_ptr<Pixels> ConvertFrame(const xmax::frame& frame) {
   return pixels;
 }
 
-std::vector<uint8_t> EncodeJpeg(const Pixels& frame) {
-  // OBS gets an up-to-720p feed. Keep the in-app texture at its original size.
-  const double scale = std::min(
-      {1.0, 1280.0 / frame.width, 720.0 / frame.height});
-  const auto width = std::max(1u, static_cast<UINT>(frame.width * scale));
-  const auto height = std::max(1u, static_cast<UINT>(frame.height * scale));
-  std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 3);
-  for (UINT y = 0; y < height; ++y) {
-    const auto source_row = (y * frame.height / height) * frame.width;
-    for (UINT x = 0; x < width; ++x) {
-      const auto source = (source_row + x * frame.width / width) * 4;
-      const auto target = (static_cast<size_t>(y) * width + x) * 3;
-      pixels[target] = frame.rgba[source + 2];
-      pixels[target + 1] = frame.rgba[source + 1];
-      pixels[target + 2] = frame.rgba[source];
-    }
-  }
-  ComPtr<IWICImagingFactory> factory;
-  Check(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                         IID_PPV_ARGS(factory.GetAddressOf())));
-  ComPtr<IStream> stream;
-  Check(CreateStreamOnHGlobal(nullptr, TRUE, stream.GetAddressOf()));
-  ComPtr<IWICBitmapEncoder> encoder;
-  Check(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr,
-                               encoder.GetAddressOf()));
-  Check(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache));
-  ComPtr<IWICBitmapFrameEncode> image;
-  Check(encoder->CreateNewFrame(image.GetAddressOf(), nullptr));
-  Check(image->Initialize(nullptr));
-  Check(image->SetSize(width, height));
-  auto format = GUID_WICPixelFormat24bppBGR;
-  Check(image->SetPixelFormat(&format));
-  if (!IsEqualGUID(format, GUID_WICPixelFormat24bppBGR)) {
-    throw std::runtime_error("Windows JPEG encoder rejected the pixel format.");
-  }
-  Check(image->WritePixels(height, width * 3, static_cast<UINT>(pixels.size()),
-                           pixels.data()));
-  Check(image->Commit());
-  Check(encoder->Commit());
-  STATSTG size{};
-  Check(stream->Stat(&size, STATFLAG_NONAME));
-  if (size.cbSize.HighPart != 0) {
-    throw std::runtime_error("Encoded video frame is too large.");
-  }
-  LARGE_INTEGER start{};
-  Check(stream->Seek(start, STREAM_SEEK_SET, nullptr));
-  std::vector<uint8_t> result(size.cbSize.LowPart);
-  ULONG read = 0;
-  Check(stream->Read(result.data(), size.cbSize.LowPart, &read));
-  result.resize(read);
-  return result;
-}
-
 void WriteError(char* error, int capacity, const std::exception& exception) {
   if (capacity > 0) strncpy_s(error, static_cast<size_t>(capacity),
                              exception.what(), _TRUNCATE);
@@ -279,6 +289,7 @@ extern "C" __declspec(dllexport) Session* realface_xmax_start(
       }
     });
     if (*token != '\0') {
+      session->output_thread = std::thread(RunOutputWindow, session.get());
       auto conditions = xmax::realtime_context{prompt, std::nullopt};
       if (*reference != '\0') conditions.reference_path = reference;
       session->generation_thread = std::thread(
@@ -329,9 +340,8 @@ static int UpdateTextures(Session* session) {
         slot->latest = pixels;
       }
       if (remote) {
-        std::lock_guard<std::mutex> lock(session->obs_mutex);
-        session->obs_frame = pixels;
-        session->obs_timestamp = timestamp;
+        std::lock_guard<std::mutex> lock(session->output_mutex);
+        session->output_frame = std::make_shared<xmax::frame>(std::move(frame));
       }
       {
         std::lock_guard<std::mutex> lock(registrar_mutex);
@@ -351,29 +361,14 @@ static int UpdateTextures(Session* session) {
 // Bit 0 marks a new camera frame; bit 1 marks a new generated frame.
 extern "C" __declspec(dllexport) int realface_xmax_poll(Session* session) {
   if (session->generation_failed.load()) return -2;
-  return session->frame_updates.exchange(0);
+  const int updated = session->frame_updates.exchange(0);
+  if (updated < 0) return updated;
+  return updated | (session->output_failed.exchange(false) ? 4 : 0);
 }
 
-extern "C" __declspec(dllexport) const uint8_t* realface_xmax_obs_frame(
-    Session* session, int* length) {
-  Apartment apartment;
-  *length = 0;
-  try {
-    std::shared_ptr<const Pixels> pixels;
-    {
-      std::lock_guard<std::mutex> lock(session->obs_mutex);
-      if (!session->obs_frame ||
-          session->encoded_timestamp == session->obs_timestamp) return nullptr;
-      pixels = session->obs_frame;
-      session->encoded_timestamp = session->obs_timestamp;
-    }
-    session->jpeg = EncodeJpeg(*pixels);
-    *length = static_cast<int>(session->jpeg.size());
-    return session->jpeg.data();
-  } catch (const std::exception&) {
-    *length = -1;
-    return nullptr;
-  }
+extern "C" __declspec(dllexport) void realface_xmax_open_output(
+    Session* session) {
+  session->show_output.store(true);
 }
 
 extern "C" __declspec(dllexport) void realface_xmax_stop(Session* session) {
