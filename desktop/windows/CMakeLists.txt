@@ -32,10 +32,6 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
-# flutter_inappwebview_windows includes <experimental/coroutine>, which
-# MSVC 14.5x (Visual Studio 2026) rejects with error STL1011 unless silenced.
-add_definitions(-D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
-
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
@@ -53,14 +49,33 @@ endfunction()
 set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter")
 add_subdirectory(${FLUTTER_MANAGED_DIR})
 
-# Application build; see runner/CMakeLists.txt.
+# Windows opens the streaming studio in the default browser. The WebView
+# package remains a Dart dependency for macOS, so filter its Windows plugin
+# from the generated build files without editing Flutter's generated sources.
+set(PLUGIN_REGISTRANT "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc")
+set(PLUGIN_RULES "${FLUTTER_MANAGED_DIR}/generated_plugins.cmake")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${PLUGIN_REGISTRANT}" "${PLUGIN_RULES}")
+file(READ "${PLUGIN_REGISTRANT}" windows_plugin_registrant)
+string(REGEX REPLACE "#include <flutter_inappwebview_windows/[^>]+>
+" ""
+  windows_plugin_registrant "${windows_plugin_registrant}")
+string(REGEX REPLACE "  FlutterInappwebviewWindowsPluginCApiRegisterWithRegistrar\\([^;]*;
+" ""
+  windows_plugin_registrant "${windows_plugin_registrant}")
+file(READ "${PLUGIN_RULES}" windows_plugin_rules)
+string(REGEX REPLACE "
+  flutter_inappwebview_windows
+" "
+"
+  windows_plugin_rules "${windows_plugin_rules}")
+set(WINDOWS_PLUGIN_REGISTRANT "${CMAKE_CURRENT_BINARY_DIR}/generated_plugin_registrant.cc")
+file(WRITE "${WINDOWS_PLUGIN_REGISTRANT}" "${windows_plugin_registrant}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated_plugins.cmake"
+  "${windows_plugin_rules}")
+
 add_subdirectory("runner")
-
-
-# Generated plugin build rules, which manage building the plugins and adding
-# them to the application.
-include(flutter/generated_plugins.cmake)
-
+include("${CMAKE_CURRENT_BINARY_DIR}/generated_plugins.cmake")
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
@@ -110,26 +125,3 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
-
-# Pin Xmax to the tested Windows x64 package, including its runtime dependencies.
-include(FetchContent)
-FetchContent_Declare(xmax_windows
-  URL "https://github.com/Xmax-AI/XmaxSDK-Windows/releases/download/1.1.2/XmaxSDK-1.1.2-windows-x64.zip"
-  URL_HASH SHA256=16334cb5901aab476e2826c2b36792bb98bfa7e03c4fa93617ba257da606d9b3
-)
-FetchContent_GetProperties(xmax_windows)
-if(NOT xmax_windows_POPULATED)
-  FetchContent_Populate(xmax_windows)
-endif()
-find_package(XmaxSDK 1.1.2 EXACT CONFIG REQUIRED
-  PATHS "${xmax_windows_SOURCE_DIR}" NO_DEFAULT_PATH)
-add_library(realface_xmax SHARED runner/xmax_bridge.cpp)
-target_compile_features(realface_xmax PRIVATE cxx_std_17)
-target_compile_definitions(realface_xmax PRIVATE NOMINMAX)
-target_link_libraries(realface_xmax PRIVATE flutter Xmax::SDK user32 gdi32 ole32)
-target_link_libraries(${BINARY_NAME} PRIVATE realface_xmax)
-install(TARGETS realface_xmax RUNTIME DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
-  COMPONENT Runtime)
-install(DIRECTORY "${xmax_windows_SOURCE_DIR}/bin/"
-  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}" COMPONENT Runtime
-  FILES_MATCHING PATTERN "*.dll" PATTERN "Xmax.VideoBeautyWorker.exe")

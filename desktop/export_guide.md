@@ -89,13 +89,9 @@ flutter build windows --release
 ```
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-This Windows test build uses native Xmax X2.1 streaming. The first build
-downloads the pinned Windows SDK from GitHub and verifies its SHA-256 hash.
-
-Open the streaming screen and wait for the camera preview before selecting
-**Start stream**. When generated video is live, select **Open AI Output**.
-In OBS, add a **Window Capture** source and choose **RealFaceAI AI Output**.
-This separate window displays only generated video.
+On Windows, RealFaceAI opens its streaming studio in your default browser.
+Keep the desktop app open while streaming. For OBS, enable **Send output to OBS**
+in the browser studio and paste its URL into an OBS Browser Source.
 
 ### Build a signed installer for direct downloads
 

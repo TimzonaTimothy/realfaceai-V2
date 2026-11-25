@@ -1216,10 +1216,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
-import '../../services/windows_xmax.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/error_handler.dart';
 
@@ -1267,6 +1267,15 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Phase ──────────────────────────────────────────────────────────────────
   _Phase _phase = _Phase.fetchingToken;
   String? _error;
+  final _studioPath =
+      '/studio/${List.generate(24, (_) => _secureRandom.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+  static final _secureRandom = Random.secure();
+  String? _browserStopReason;
+  DateTime? _browserContact;
+  int _creditRevision = 0;
+  bool _browserRetrying = false;
+
+  Uri get _studioUri => Uri.parse('http://127.0.0.1:$_port$_studioPath');
 
   // ── Token data ─────────────────────────────────────────────────────────────
   String? _streamToken;
@@ -1291,24 +1300,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   InAppWebViewController? _webViewController;
 
   Timer? _heartbeatTimer;
-  Future<void>? _windowsTask;
-  bool _windowsRunning = false;
-  bool _windowsBusy = false;
-  bool _previewReady = false;
-  bool _nativeLive = false;
-  bool _changingCamera = false;
-  int? _windowsOutputSession;
-  String _windowsCamera = '';
-  Map<String, String> _windowsCameras = {};
-  int? _cameraTexture;
-  int? _resultTexture;
-  final _nativeCreditClock = Stopwatch();
-
-  String get _nativeTimeLeft {
-    final seconds =
-        max(0, (_remainingSeconds ?? 0) - _nativeCreditClock.elapsed.inSeconds);
-    return '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
-  }
 
   // ── Assets (loaded once at boot) ──────────────────────────────────────────
   String _logoBase64 = '';
@@ -1330,16 +1321,11 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   @override
   void initState() {
     super.initState();
-    if (Platform.isWindows) {
-      _boot();
-    } else {
-      _loadAssets().then((_) => _boot());
-    }
+    _loadAssets().then((_) => _boot());
   }
 
   @override
   void dispose() {
-    _windowsRunning = false;
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1408,25 +1394,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       _error = null;
     });
 
-    if (Platform.isWindows) {
-      try {
-        final cameras = await listWindowsXmaxCameras();
-        if (!mounted) return;
-        setState(() {
-          _windowsCameras = cameras;
-          _phase = _Phase.ready;
-        });
-        _openWindowsPreview();
-      } catch (error) {
-        if (!mounted) return;
-        setState(() {
-          _error = ErrorHandler.sanitize(error);
-          _phase = _Phase.error;
-        });
-      }
-      return;
-    }
-
     try {
       if (!mounted) return;
       final result = await ApiService.instance.getRealtimeToken(
@@ -1476,253 +1443,121 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       return;
     }
 
-    if (mounted) setState(() => _phase = _Phase.ready);
-  }
-
-  void _openWindowsPreview() {
-    if (!mounted || _windowsTask != null) return;
-    _windowsTask = _runWindowsSession(live: false);
-  }
-
-  Future<void> _startWindowsStream() async {
-    if (!_previewReady || _windowsBusy) return;
-    setState(() => _windowsBusy = true);
-    await _endWindowsSession();
     if (!mounted) return;
-    _windowsTask = _runWindowsSession(live: true);
+    setState(() => _phase = _Phase.ready);
+    if (Platform.isWindows) await _openBrowserStudio();
   }
 
-  Future<void> _stopWindowsStream() async {
-    setState(() => _windowsRunning = false);
-    _stopHeartbeat();
-    await _windowsTask;
-    _openWindowsPreview();
-  }
-
-  Future<void> _endWindowsSession() async {
-    _windowsRunning = false;
-    await _windowsTask;
-  }
-
-  Future<void> _runWindowsSession({required bool live}) async {
-    _windowsRunning = true;
-    int? session;
-    final frameClock = Stopwatch()..start();
-    final outputClock = Stopwatch()..start();
-    var reportedSecond = -1;
+  Future<void> _openBrowserStudio() async {
     try {
-      var token = '';
-      var prompt = '';
-      var reference = '';
-      if (live) {
-        final config = await ApiService.instance.getRealtimeToken(
-          faceImageBase64: widget.faceImageBase64,
-          prompt: widget.prompt,
-        );
-        if (!mounted || !_windowsRunning) return;
-        final code = config['statusCode'];
-        if (code != null && code != 200) {
-          throw Exception(config['error'] ?? 'Failed to get stream token.');
-        }
-        if (config['model'] != 'x2.1') {
-          throw StateError('Native Windows streaming requires X2.1.');
-        }
-        _creditsRemaining = (config['credits_remaining'] as num?)?.toDouble();
-        _creditsPerSecond =
-            (config['credits_per_second'] as num?)?.toDouble() ?? 2;
-        if (_creditsRemaining case final credits?) {
-          context.read<AuthProvider>().updateCredits(credits);
-        }
-        token = config['token'] as String;
-        prompt = config['prompt'] as String? ?? '';
-        reference = config['reference_url'] as String? ?? '';
-      }
-      final handle =
-          await startWindowsXmax(token, prompt, reference, _windowsCamera);
-      session = handle;
-      if (!mounted || !_windowsRunning) return;
-      final (camera, result) = windowsXmaxTextures(handle);
-      setState(() {
-        _cameraTexture = camera;
-        _resultTexture = live ? result : null;
-        _windowsOutputSession = live ? handle : null;
-      });
-      frameClock.reset();
-      while (mounted && _windowsRunning) {
-        final changed = pollWindowsXmax(handle);
-        if (!mounted || !_windowsRunning) break;
-        if (changed & 1 != 0 && !_previewReady) {
-          setState(() => _previewReady = true);
-        }
-        if (changed & 2 != 0) {
-          if (!_nativeLive) {
-            _startHeartbeat();
-            _nativeCreditClock
-              ..reset()
-              ..start();
-            setState(() => _nativeLive = true);
-          }
-          outputClock.reset();
-        }
-        if (changed & 4 != 0) {
-          setState(() => _error = 'Could not display the AI Output window.');
-        }
-        final seconds = _nativeCreditClock.elapsed.inSeconds;
-        if (_nativeLive && seconds != reportedSecond) {
-          reportedSecond = seconds;
-          setState(() {});
-        }
-        if (live && outputClock.elapsed.inSeconds >= 30) {
-          throw StateError(
-              'No generated video arrived. Check your connection and try again.');
-        }
-        if (!live && !_previewReady && frameClock.elapsed.inSeconds >= 10) {
-          throw StateError(
-              'No camera video arrived. Check the selected camera and try again.');
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 16));
+      if (await launchUrl(_studioUri, mode: LaunchMode.externalApplication)) {
+        if (mounted) setState(() => _error = null);
+        return;
       }
     } catch (error) {
-      if (mounted && _windowsRunning) {
-        setState(() => _error = error is StateError
-            ? error.message.toString()
-            : ErrorHandler.sanitize(error));
-      }
-    } finally {
-      _stopHeartbeat();
-      _nativeCreditClock.stop();
-      if (mounted) {
-        setState(() {
-          _previewReady = false;
-          _nativeLive = false;
-          _cameraTexture = null;
-          _resultTexture = null;
-          _windowsOutputSession = null;
-        });
-      }
-      try {
-        if (session != null) await stopWindowsXmax(session);
-      } finally {
-        _windowsTask = null;
-        if (mounted) {
-          setState(() {
-            if (live) _windowsBusy = false;
-          });
-        }
-      }
+      debugPrint('[RealtimeScreen] Browser launch failed: $error');
+    }
+    if (mounted) {
+      setState(
+          () => _error = 'Copy the studio link and open it in your browser.');
     }
   }
 
-  Future<void> _selectWindowsCamera(String? camera) async {
-    if (_windowsBusy || _changingCamera) return;
-    setState(() => _changingCamera = true);
-    await _endWindowsSession();
-    if (!mounted) return;
-    setState(() {
-      _windowsCamera = camera ?? '';
-      _changingCamera = false;
-      _error = null;
-    });
-    _openWindowsPreview();
-  }
-
-  Widget _buildWindowsStream() {
-    Widget video(int? texture, String placeholder) => Expanded(
-          child: ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: texture == null
-                  ? Text(placeholder)
-                  : AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: Texture(textureId: texture),
-                    ),
-            ),
-          ),
-        );
-
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              OutlinedButton(
-                onPressed: _onPageBack,
-                child: const Text('Back to studio'),
-              ),
-              FilledButton(
-                onPressed: !_windowsBusy
-                    ? (_previewReady && !_changingCamera
-                        ? _startWindowsStream
-                        : null)
-                    : _windowsRunning
-                        ? _stopWindowsStream
-                        : null,
-                child: Text(_windowsBusy ? 'Stop stream' : 'Start stream'),
-              ),
-              DropdownButton<String>(
-                value: _windowsCamera,
-                items: [
-                  const DropdownMenuItem(
-                    value: '',
-                    child: Text('Default camera'),
-                  ),
-                  for (final camera in _windowsCameras.entries)
-                    DropdownMenuItem(
-                      value: camera.key,
-                      child: Text(camera.value),
-                    ),
-                ],
-                onChanged: _windowsBusy || _changingCamera
-                    ? null
-                    : _selectWindowsCamera,
-              ),
-              OutlinedButton(
-                onPressed: _nativeLive && _windowsRunning
-                    ? () {
-                        if (_windowsOutputSession case final session?) {
-                          openWindowsXmaxOutput(session);
-                        }
-                      }
-                    : null,
-                child: const Text('Open AI Output'),
-              ),
-              if (_creditsText case final credits?) Text(credits),
-              if (_nativeLive && _remainingSeconds != null)
-                Text('Time left: $_nativeTimeLeft'),
-              if (!_windowsBusy && !_previewReady && _windowsTask == null)
-                OutlinedButton(
-                  onPressed: () => _selectWindowsCamera(_windowsCamera),
-                  child: const Text('Preview camera'),
-                ),
-            ],
-          ),
-          if (_error case final error?)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Text(error),
-            ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+  Widget _buildBrowserStudio() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Streaming studio', style: TextStyle(fontSize: 24)),
+            const SizedBox(height: 12),
+            Text(_error ??
+                'Keep RealFaceAI open while streaming in your browser.'),
+            const SizedBox(height: 20),
+            Wrap(
+              spacing: 12,
+              alignment: WrapAlignment.center,
               children: [
-                if (!_nativeLive) video(_cameraTexture, 'Camera preview'),
-                if (_windowsBusy) ...[
-                  if (!_nativeLive) const SizedBox(width: 12),
-                  video(_resultTexture, 'Waiting for generated video…'),
-                ],
+                FilledButton(
+                  onPressed: _openBrowserStudio,
+                  child: const Text('Open studio in browser'),
+                ),
+                OutlinedButton(
+                  onPressed: () async {
+                    await Clipboard.setData(
+                        ClipboardData(text: _studioUri.toString()));
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Studio link copied.')),
+                      );
+                    }
+                  },
+                  child: const Text('Copy studio link'),
+                ),
+                TextButton(
+                    onPressed: _onPageBack,
+                    child: const Text('Back to studio')),
               ],
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  Future<void> _handleStudioEvent(HttpRequest request, String event) async {
+    final isStatus = event == 'status';
+    final valid = isStatus
+        ? request.method == 'GET'
+        : request.method == 'POST' &&
+            request.headers.value('origin') == _studioUri.origin;
+    if (!valid) {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+      return;
+    }
+
+    var ok = true;
+    switch (event) {
+      case 'start':
+        ok = _browserStopReason == null && !_browserRetrying;
+        if (ok && _heartbeatTimer == null) {
+          _browserContact = DateTime.now();
+          _onPageStarted();
+        }
+      case 'status':
+        _browserContact = DateTime.now();
+      case 'stop':
+      case 'back':
+        _stopHeartbeat();
+      case 'retry':
+        if (_browserRetrying || _heartbeatTimer != null) {
+          ok = false;
+          break;
+        }
+        _browserRetrying = true;
+        try {
+          ok = await _refreshStreamForRetry();
+          if (ok) _browserStopReason = null;
+        } finally {
+          _browserRetrying = false;
+        }
+      default:
+        ok = false;
+    }
+    request.response
+      ..headers.contentType = ContentType.json
+      ..headers.set('Cache-Control', 'no-store')
+      ..write(jsonEncode({
+        'ok': ok,
+        'credits': _creditsText,
+        'seconds': _remainingSeconds,
+        'revision': _creditRevision,
+        'stopReason': _browserStopReason,
+      }));
+    await request.response.close();
+    if (event == 'back') _onPageBack();
   }
 
   /// Reads the model + prompt the backend chose for this session.
@@ -1743,6 +1578,15 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     _heartbeatTimer =
         Timer.periodic(const Duration(seconds: 10), (timer) async {
       try {
+        final contact = _browserContact;
+        if (Platform.isWindows &&
+            contact != null &&
+            DateTime.now().difference(contact).inSeconds >= 8) {
+          _stopPage(
+              'The browser disconnected. Return to RealFaceAI to start a new session.');
+          _stopHeartbeat();
+          return;
+        }
         final result = await ApiService.instance.streamHeartbeat();
         if (!mounted || timer != _heartbeatTimer) return;
         // Stop on: out of credits (402), account frozen/suspended (403) or
@@ -1754,12 +1598,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (newCredits != null) {
           _creditsRemaining = newCredits;
           context.read<AuthProvider>().updateCredits(newCredits);
-          if (Platform.isWindows) {
-            _nativeCreditClock.reset();
-            setState(() {});
-          } else {
-            _pushCreditsUpdate();
-          }
+          _creditRevision++;
+          _pushCreditsUpdate();
         }
         if (stop) {
           final reason = code == 402
@@ -1783,10 +1623,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   void _stopPage(String reason) {
     if (Platform.isWindows) {
-      setState(() {
-        _windowsRunning = false;
-        _error = reason;
-      });
+      _browserStopReason = reason;
       return;
     }
     _webViewController?.evaluateJavascript(
@@ -1818,11 +1655,12 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   /// An explicit retry needs a fresh token for the reloaded page.
-  Future<void> _refreshStreamForRetry() async {
-    if (!mounted) return;
+  Future<bool> _refreshStreamForRetry() async {
+    if (!mounted) return false;
     try {
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
+        prompt: widget.prompt,
       );
       if (mounted && result['statusCode'] == 200) {
         _applyStreamConfig(result);
@@ -1833,12 +1671,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (_creditsRemaining case final credits?) {
           context.read<AuthProvider>().updateCredits(credits);
         }
+        return true;
       }
     } catch (_) {}
+    return false;
   }
 
   void _onPageBack() {
-    _windowsRunning = false;
     _stopHeartbeat();
     if (mounted) context.go('/playground');
   }
@@ -1857,11 +1696,33 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   Future<void> _handleRequest(HttpRequest req) async {
-    final path = req.uri.path;
+    var path = req.uri.path;
+    if (Platform.isWindows) {
+      final inStudio = path == _studioPath || path.startsWith('$_studioPath/');
+      if (!inStudio || req.headers.value('host') != _studioUri.authority) {
+        req.response.statusCode = HttpStatus.notFound;
+        await req.response.close();
+        return;
+      }
+      path = path.substring(_studioPath.length);
+      req.response.headers
+        ..set('Referrer-Policy', 'no-referrer')
+        ..set('Content-Security-Policy', "frame-ancestors 'none'");
+      if (path.startsWith('/event/')) {
+        await _handleStudioEvent(req, path.substring('/event/'.length));
+        return;
+      }
+      if (path == '/push' && req.headers.value('origin') != _studioUri.origin) {
+        req.response.statusCode = HttpStatus.forbidden;
+        await req.response.close();
+        return;
+      }
+    } else {
+      req.response.headers.set('Access-Control-Allow-Origin', '*');
+    }
 
     // CORS + camera permission headers on every response
     req.response.headers
-      ..set('Access-Control-Allow-Origin', '*')
       ..set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
       ..set('Access-Control-Allow-Headers', 'Content-Type')
       ..set('Feature-Policy', 'camera *; microphone *')
@@ -1960,8 +1821,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           ..headers
               .set('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
           ..headers.set('Cache-Control', 'no-cache')
-          ..headers.set('Connection', 'keep-alive')
-          ..headers.set('Access-Control-Allow-Origin', '*');
+          ..headers.set('Connection', 'keep-alive');
         final snap = _latestFrameBytes;
         if (snap != null) {
           req.response
@@ -2006,7 +1866,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       default:
         // Unknown static file: a real 404, not the HTML page (a script
         // served as text/html fails with a confusing MIME error).
-        if (path.startsWith('/static/')) {
+        if (path.startsWith('/static/') ||
+            (Platform.isWindows && path.isNotEmpty && path != '/')) {
           req.response
             ..statusCode = 404
             ..close();
@@ -2065,7 +1926,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   const img = document.getElementById('frame');
   const msg = document.getElementById('msg');
   function connect() {
-    img.src = '/stream?t=' + Date.now();
+    img.src = './stream?t=' + Date.now();
     img.onload  = () => { msg.style.display = 'none'; };
     img.onerror = () => { setTimeout(connect, 1000); };
   }
@@ -2094,6 +1955,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         : '';
     final port = _port.toString();
     final windowsJs = Platform.isWindows ? 'true' : 'false';
+    final studioBase =
+        Platform.isWindows ? _studioUri.toString() : 'http://127.0.0.1:$port';
     final preferredCamera = _escape(_preferredCameraLabel);
     final sdkVersion = _sdkVersion;
     final initialCredits = jsonEncode(_creditsText);
@@ -2284,7 +2147,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
 <!-- SDK served locally — no external URLs, no provider branding in traffic -->
 <script type="importmap">
-  { "imports": { "rt-sdk": "http://127.0.0.1:$port/static/rt.js?v=$sdkVersion" } }
+  { "imports": { "rt-sdk": "$studioBase/static/rt.js?v=$sdkVersion" } }
 </script>
 </head>
 <body>
@@ -2425,12 +2288,83 @@ const FACE_PROMPT = '$safePrompt';      // chosen by the backend
 const PROMPT_ENHANCE = $enhanceJs;
 const FACE_URL = '$faceDataUrl';
 const REFERENCE_URL = '$safeReference'; // face uploaded by the backend, if it could
-const SERVER   = 'http://127.0.0.1:$port';
+const SERVER   = '$studioBase';
 const IS_WINDOWS = $windowsJs;
 let preferredCameraLabel = '$preferredCamera';
 
+let browserRun = 0;
+let browserTimer;
+let lastCreditRevision = -1;
+
+async function studioEvent(name) {
+  const response = await fetch(SERVER + '/event/' + name, {
+    method: name === 'status' ? 'GET' : 'POST',
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('RealFaceAI disconnected.');
+  return response.json();
+}
+
+async function watchStudio(run) {
+  try {
+    const state = await studioEvent('status');
+    if (browserRun !== run || !_sessionStarted) return;
+    if (state.stopReason) {
+      window.stopStream(state.stopReason);
+      return;
+    }
+    if (lastCreditRevision !== state.revision) {
+      lastCreditRevision = state.revision;
+      window.updateStreamCredits(state.credits, state.seconds);
+    }
+    browserTimer = setTimeout(() => watchStudio(run), 1000);
+  } catch (_) {
+    if (browserRun === run && _sessionStarted) {
+      window.stopStream('RealFaceAI disconnected. Reopen the studio from the app.');
+    }
+  }
+}
+
 function notifyApp(name, arg) {
-  return window.flutter_inappwebview?.callHandler(name, arg);
+  if (!IS_WINDOWS) return window.flutter_inappwebview?.callHandler(name, arg);
+  switch (name) {
+    case 'onStreamStarted': {
+      const run = ++browserRun;
+      void studioEvent('start').then(state => {
+        if (browserRun !== run || !_sessionStarted) return;
+        if (state.ok) return watchStudio(run);
+        window.stopStream(state.stopReason || 'Could not start the session.');
+      }).catch(() => {
+        if (browserRun === run && _sessionStarted) window.stopStream('RealFaceAI disconnected.');
+      });
+      break;
+    }
+    case 'onStreamStopped':
+    case 'onError':
+      browserRun++;
+      clearTimeout(browserTimer);
+      void studioEvent('stop').catch(() => {});
+      break;
+    case 'onStreamRetry':
+      return studioEvent('retry').then(state => {
+        if (state.ok) location.reload();
+        else errMsg.textContent = 'Could not prepare a new session. Try again.';
+      }).catch(() => { errMsg.textContent = 'Open the studio again from RealFaceAI.'; });
+    case 'onGoBack':
+      browserRun++;
+      clearTimeout(browserTimer);
+      document.body.textContent = 'Returned to RealFaceAI. You can close this tab.';
+      void studioEvent('back').catch(() => {});
+      break;
+    case 'copyObsUrl':
+      return navigator.clipboard?.writeText(SERVER + '/popout').then(() => true);
+  }
+}
+
+if (IS_WINDOWS) {
+  window.addEventListener('pagehide', () => {
+    if (_sessionStarted) navigator.sendBeacon(SERVER + '/event/stop');
+  });
 }
 
 // ── Camera ────────────────────────────────────────────────────────────────────
@@ -3036,7 +2970,12 @@ window.addEventListener('load', function() {
   document.getElementById('retryBtn').addEventListener('click', function() { location.reload(); });
   ['backBtn', 'goBackBtn'].forEach(function(id) {
     document.getElementById(id).addEventListener('click', function() {
-      if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler('onGoBack');
+      if ($windowsJs) {
+        document.body.textContent = 'Returned to RealFaceAI. You can close this tab.';
+        fetch('$studioBase/event/back', { method: 'POST' }).catch(() => {});
+      } else if (window.flutter_inappwebview) {
+        window.flutter_inappwebview.callHandler('onGoBack');
+      }
     });
   });
   fail();
@@ -3071,7 +3010,7 @@ window.addEventListener('load', function() {
         fit: StackFit.expand,
         children: [
           if (_phase == _Phase.ready && Platform.isWindows)
-            _buildWindowsStream()
+            _buildBrowserStudio()
           else if (_phase == _Phase.ready && _port != null)
             InAppWebView(
               initialUrlRequest: URLRequest(
@@ -3137,7 +3076,7 @@ window.addEventListener('load', function() {
                   handlerName: 'onStreamRetry',
                   callback: (_) async {
                     _stopHeartbeat();
-                    await _refreshStreamForRetry();
+                    if (!await _refreshStreamForRetry()) return;
                     // Reload the WebView — new token will be baked into fresh HTML
                     if (mounted && _phase == _Phase.ready) {
                       await controller.reload();
