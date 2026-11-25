@@ -380,7 +380,10 @@ extern "C" __declspec(dllexport) int64_t realface_xmax_texture(
 static int UpdateTextures(Session* session) {
   try {
     int changed = 0;
-    for (int remote = 0; remote < 2; ++remote) {
+    for (int remote = 1; remote >= 0; --remote) {
+      // The SDK still captures and publishes the camera. Only the local
+      // display conversion stops after the first generated frame.
+      if (!remote && session->timestamps[1] != -1) continue;
       std::optional<xmax::realtime_media_stream> stream = session->local;
       if (remote) {
         std::lock_guard<std::mutex> lock(session->generation_mutex);

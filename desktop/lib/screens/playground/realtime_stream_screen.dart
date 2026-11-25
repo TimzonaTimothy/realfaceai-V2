@@ -1492,6 +1492,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     _windowsTask = _runWindowsSession(live: true);
   }
 
+  Future<void> _stopWindowsStream() async {
+    setState(() => _windowsRunning = false);
+    _stopHeartbeat();
+    await _windowsTask;
+    _openWindowsPreview();
+  }
+
   Future<void> _endWindowsSession() async {
     _windowsRunning = false;
     await _windowsTask;
@@ -1654,7 +1661,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
                         ? _startWindowsStream
                         : null)
                     : _windowsRunning
-                        ? () => setState(() => _windowsRunning = false)
+                        ? _stopWindowsStream
                         : null,
                 child: Text(_windowsBusy ? 'Stop stream' : 'Start stream'),
               ),
@@ -1705,14 +1712,11 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                video(_cameraTexture, 'Camera preview'),
-                const SizedBox(width: 12),
-                video(
-                  _resultTexture,
-                  _windowsBusy
-                      ? 'Waiting for generated video…'
-                      : 'Generated video',
-                ),
+                if (!_nativeLive) video(_cameraTexture, 'Camera preview'),
+                if (_windowsBusy) ...[
+                  if (!_nativeLive) const SizedBox(width: 12),
+                  video(_resultTexture, 'Waiting for generated video…'),
+                ],
               ],
             ),
           ),
