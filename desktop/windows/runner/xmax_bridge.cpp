@@ -125,8 +125,6 @@ struct Session {
   int64_t timestamps[2] = {-1, -1};
   Texture local_texture = NewTexture();
   Texture remote_texture = NewTexture();
-  std::mutex output_mutex;
-  std::shared_ptr<const xmax::frame> output_frame;
   std::atomic<bool> show_output{false};
   std::atomic<bool> output_failed{false};
   std::atomic<bool> running{true};
@@ -137,14 +135,88 @@ struct Session {
   std::thread output_thread;
 };
 
-HWND CreateOutputWindow() {
+struct OutputWindow {
+  std::shared_ptr<const Pixels> frame;
+};
+
+void PaintOutput(HWND window, const OutputWindow* output) {
+  PAINTSTRUCT paint{};
+  const auto dc = BeginPaint(window, &paint);
+  RECT client{};
+  GetClientRect(window, &client);
+  const auto width = client.right;
+  const auto height = client.bottom;
+  const auto* frame = output ? output->frame.get() : nullptr;
+  if (!frame || width <= 0 || height <= 0) {
+    FillRect(dc, &client, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+    EndPaint(window, &paint);
+    return;
+  }
+
+  const double scale = std::min(static_cast<double>(width) / frame->width,
+                                static_cast<double>(height) / frame->height);
+  const int draw_width = std::max(1, static_cast<int>(frame->width * scale));
+  const int draw_height = std::max(1, static_cast<int>(frame->height * scale));
+  const int x = (width - draw_width) / 2;
+  const int y = (height - draw_height) / 2;
+  const auto black = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+  const RECT bars[] = {
+      {0, 0, width, y}, {0, y + draw_height, width, height},
+      {0, y, x, y + draw_height},
+      {x + draw_width, y, width, y + draw_height},
+  };
+  for (const auto& bar : bars) FillRect(dc, &bar, black);
+
+  struct {
+    BITMAPINFOHEADER header;
+    DWORD masks[3];
+  } dib{};
+  dib.header.biSize = sizeof(dib.header);
+  dib.header.biWidth = static_cast<LONG>(frame->width);
+  dib.header.biHeight = -static_cast<LONG>(frame->height);
+  dib.header.biPlanes = 1;
+  dib.header.biBitCount = 32;
+  dib.header.biCompression = BI_BITFIELDS;
+  dib.masks[0] = 0x000000ff;
+  dib.masks[1] = 0x0000ff00;
+  dib.masks[2] = 0x00ff0000;
+  SetStretchBltMode(dc, COLORONCOLOR);
+  StretchDIBits(dc, x, y, draw_width, draw_height, 0, 0,
+                static_cast<int>(frame->width), static_cast<int>(frame->height),
+                frame->rgba.data(), reinterpret_cast<const BITMAPINFO*>(&dib),
+                DIB_RGB_COLORS, SRCCOPY);
+  EndPaint(window, &paint);
+}
+
+LRESULT CALLBACK OutputWindowProc(HWND window, UINT message, WPARAM wparam,
+                                  LPARAM lparam) {
+  switch (message) {
+    case WM_NCCREATE: {
+      const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lparam);
+      SetWindowLongPtrW(window, GWLP_USERDATA,
+                        reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+      break;
+    }
+    case WM_ERASEBKGND:
+      return 1;
+    case WM_PAINT:
+      PaintOutput(window, reinterpret_cast<const OutputWindow*>(
+                              GetWindowLongPtrW(window, GWLP_USERDATA)));
+      return 0;
+    case WM_SIZE:
+      InvalidateRect(window, nullptr, FALSE);
+      break;
+  }
+  return DefWindowProcW(window, message, wparam, lparam);
+}
+
+HWND CreateOutputWindow(OutputWindow* output) {
   const auto instance = GetModuleHandleW(nullptr);
   constexpr wchar_t window_class[] = L"RealFaceAIOutputWindow";
   WNDCLASSW options{};
-  options.lpfnWndProc = DefWindowProcW;
+  options.lpfnWndProc = OutputWindowProc;
   options.hInstance = instance;
   options.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  options.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
   options.lpszClassName = window_class;
   if (!RegisterClassW(&options) &&
       GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
@@ -153,14 +225,12 @@ HWND CreateOutputWindow() {
 
   return CreateWindowExW(0, window_class, L"RealFaceAI AI Output",
                         WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                        960, 580, nullptr, nullptr, instance, nullptr);
+                        960, 580, nullptr, nullptr, instance, output);
 }
 
 void RunOutputWindow(Session* session) {
-  Apartment apartment;
+  OutputWindow output;
   HWND window = nullptr;
-  std::weak_ptr<const xmax::frame> displayed;
-  RECT last_client{};
   while (session->running.load()) {
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -169,37 +239,27 @@ void RunOutputWindow(Session* session) {
     }
     if (window && !IsWindow(window)) {
       window = nullptr;
-      displayed.reset();
+      output.frame.reset();
     }
     if (session->show_output.exchange(false)) {
-      if (!window) window = CreateOutputWindow();
+      if (!window) window = CreateOutputWindow(&output);
       if (window) {
         ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
         SetForegroundWindow(window);
-        displayed.reset();
       } else {
         session->output_failed.store(true);
       }
     }
     if (window && !IsIconic(window)) {
-      std::shared_ptr<const xmax::frame> frame;
+      std::shared_ptr<const Pixels> latest;
       {
-        std::lock_guard<std::mutex> lock(session->output_mutex);
-        frame = session->output_frame;
+        const auto& slot = session->remote_texture;
+        std::lock_guard<std::mutex> lock(slot->mutex);
+        latest = slot->latest;
       }
-      RECT client{};
-      GetClientRect(window, &client);
-      if (frame && (frame != displayed.lock() ||
-                    !EqualRect(&client, &last_client))) {
-        try {
-          frame->render_window(window);
-          displayed = frame;
-          last_client = client;
-        } catch (const std::exception&) {
-          session->output_failed.store(true);
-          DestroyWindow(window);
-          window = nullptr;
-        }
+      if (latest != output.frame) {
+        output.frame = std::move(latest);
+        InvalidateRect(window, nullptr, FALSE);
       }
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -338,10 +398,6 @@ static int UpdateTextures(Session* session) {
       {
         std::lock_guard<std::mutex> lock(slot->mutex);
         slot->latest = pixels;
-      }
-      if (remote) {
-        std::lock_guard<std::mutex> lock(session->output_mutex);
-        session->output_frame = std::make_shared<xmax::frame>(std::move(frame));
       }
       {
         std::lock_guard<std::mutex> lock(registrar_mutex);
