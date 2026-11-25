@@ -4,6 +4,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 
+__declspec(dllimport) void SetXmaxTextureRegistrar(FlutterDesktopTextureRegistrarRef registrar);
+
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -25,6 +27,8 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  SetXmaxTextureRegistrar(FlutterDesktopRegistrarGetTextureRegistrar(
+      flutter_controller_->engine()->GetRegistrarForPlugin("RealFaceXmax")));
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -41,6 +45,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   if (flutter_controller_) {
+    SetXmaxTextureRegistrar(nullptr);
     flutter_controller_ = nullptr;
   }
 

@@ -1216,10 +1216,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
+import '../../services/windows_xmax.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/error_handler.dart';
 
@@ -1267,10 +1267,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Phase ──────────────────────────────────────────────────────────────────
   _Phase _phase = _Phase.fetchingToken;
   String? _error;
-  bool _webView2Missing = false;
-  static final _webView2Download = Uri.parse(
-    'https://developer.microsoft.com/en-us/microsoft-edge/webview2/#download-section',
-  );
 
   // ── Token data ─────────────────────────────────────────────────────────────
   String? _streamToken;
@@ -1295,6 +1291,24 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   InAppWebViewController? _webViewController;
 
   Timer? _heartbeatTimer;
+  Future<void>? _windowsTask;
+  bool _windowsRunning = false;
+  bool _windowsBusy = false;
+  bool _previewReady = false;
+  bool _nativeLive = false;
+  bool _changingCamera = false;
+  bool _sendToObs = false;
+  String _windowsCamera = '';
+  Map<String, String> _windowsCameras = {};
+  int? _cameraTexture;
+  int? _resultTexture;
+  final _nativeCreditClock = Stopwatch();
+
+  String get _nativeTimeLeft {
+    final seconds =
+        max(0, (_remainingSeconds ?? 0) - _nativeCreditClock.elapsed.inSeconds);
+    return '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
 
   // ── Assets (loaded once at boot) ──────────────────────────────────────────
   String _logoBase64 = '';
@@ -1316,11 +1330,16 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAssets().then((_) => _boot());
+    if (Platform.isWindows) {
+      _boot();
+    } else {
+      _loadAssets().then((_) => _boot());
+    }
   }
 
   @override
   void dispose() {
+    _windowsRunning = false;
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1387,22 +1406,30 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     setState(() {
       _phase = _Phase.fetchingToken;
       _error = null;
-      _webView2Missing = false;
     });
 
-    // Step 1 — check the embedded runtime and fetch the streaming token.
-    try {
-      if (Platform.isWindows &&
-          await WebViewEnvironment.getAvailableVersion() == null) {
+    if (Platform.isWindows) {
+      try {
+        final cameras = await listWindowsXmaxCameras();
+        if (!mounted) return;
+        await _startServer();
         if (!mounted) return;
         setState(() {
-          _webView2Missing = true;
-          _error =
-              'Install the Microsoft Edge WebView2 Runtime, then try again.';
+          _windowsCameras = cameras;
+          _phase = _Phase.ready;
+        });
+        _openWindowsPreview();
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _error = ErrorHandler.sanitize(error);
           _phase = _Phase.error;
         });
-        return;
       }
+      return;
+    }
+
+    try {
       if (!mounted) return;
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
@@ -1454,6 +1481,264 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     if (mounted) setState(() => _phase = _Phase.ready);
   }
 
+  void _openWindowsPreview() {
+    if (!mounted || _windowsTask != null) return;
+    _windowsTask = _runWindowsSession(live: false);
+  }
+
+  Future<void> _startWindowsStream() async {
+    if (!_previewReady || _windowsBusy) return;
+    setState(() => _windowsBusy = true);
+    await _endWindowsSession();
+    if (!mounted) return;
+    _windowsTask = _runWindowsSession(live: true);
+  }
+
+  Future<void> _endWindowsSession() async {
+    _windowsRunning = false;
+    await _windowsTask;
+  }
+
+  Future<void> _runWindowsSession({required bool live}) async {
+    _windowsRunning = true;
+    int? session;
+    Future<void>? obs;
+    final frameClock = Stopwatch()..start();
+    final outputClock = Stopwatch()..start();
+    var reportedSecond = -1;
+    try {
+      var token = '';
+      var prompt = '';
+      var reference = '';
+      if (live) {
+        final config = await ApiService.instance.getRealtimeToken(
+          faceImageBase64: widget.faceImageBase64,
+          prompt: widget.prompt,
+        );
+        if (!mounted || !_windowsRunning) return;
+        final code = config['statusCode'];
+        if (code != null && code != 200) {
+          throw Exception(config['error'] ?? 'Failed to get stream token.');
+        }
+        if (config['model'] != 'x2.1') {
+          throw StateError('Native Windows streaming requires X2.1.');
+        }
+        _creditsRemaining = (config['credits_remaining'] as num?)?.toDouble();
+        _creditsPerSecond =
+            (config['credits_per_second'] as num?)?.toDouble() ?? 2;
+        if (_creditsRemaining case final credits?) {
+          context.read<AuthProvider>().updateCredits(credits);
+        }
+        token = config['token'] as String;
+        prompt = config['prompt'] as String? ?? '';
+        reference = config['reference_url'] as String? ?? '';
+      }
+      final handle =
+          await startWindowsXmax(token, prompt, reference, _windowsCamera);
+      session = handle;
+      if (!mounted || !_windowsRunning) return;
+      final (camera, result) = windowsXmaxTextures(handle);
+      setState(() {
+        _cameraTexture = camera;
+        _resultTexture = live ? result : null;
+      });
+      frameClock.reset();
+      var lastObsAt = -100;
+      while (mounted && _windowsRunning) {
+        final tick = frameClock.elapsedMilliseconds;
+        final changed = pollWindowsXmax(handle);
+        if (!mounted || !_windowsRunning) break;
+        if (changed & 1 != 0 && !_previewReady) {
+          setState(() => _previewReady = true);
+        }
+        if (changed & 2 != 0) {
+          if (!_nativeLive) {
+            _startHeartbeat();
+            _nativeCreditClock
+              ..reset()
+              ..start();
+            setState(() => _nativeLive = true);
+          }
+          outputClock.reset();
+          if (_sendToObs && obs == null && tick - lastObsAt >= 100) {
+            lastObsAt = tick;
+            obs = _sendNativeObsFrame(handle).whenComplete(() => obs = null);
+          }
+        }
+        final seconds = _nativeCreditClock.elapsed.inSeconds;
+        if (_nativeLive && seconds != reportedSecond) {
+          reportedSecond = seconds;
+          setState(() {});
+        }
+        if (live && outputClock.elapsed.inSeconds >= 30) {
+          throw StateError(
+              'No generated video arrived. Check your connection and try again.');
+        }
+        if (!live && !_previewReady && frameClock.elapsed.inSeconds >= 10) {
+          throw StateError(
+              'No camera video arrived. Check the selected camera and try again.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 32));
+      }
+    } catch (error) {
+      if (mounted && _windowsRunning) {
+        setState(() => _error = error is StateError
+            ? error.message.toString()
+            : ErrorHandler.sanitize(error));
+      }
+    } finally {
+      _stopHeartbeat();
+      _nativeCreditClock.stop();
+      if (mounted) {
+        setState(() {
+          _previewReady = false;
+          _nativeLive = false;
+          _cameraTexture = null;
+          _resultTexture = null;
+        });
+      }
+      try {
+        await obs;
+        if (session != null) await stopWindowsXmax(session);
+      } finally {
+        _windowsTask = null;
+        if (mounted) {
+          setState(() {
+            if (live) _windowsBusy = false;
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _sendNativeObsFrame(int handle) async {
+    try {
+      final bytes = await readWindowsObsFrame(handle);
+      if (mounted && _windowsRunning && _sendToObs && bytes != null) {
+        await _publishObsFrame(bytes);
+      }
+    } catch (error) {
+      debugPrint('[RealtimeScreen] Native OBS frame failed: $error');
+    }
+  }
+
+  Future<void> _selectWindowsCamera(String? camera) async {
+    if (_windowsBusy || _changingCamera) return;
+    setState(() => _changingCamera = true);
+    await _endWindowsSession();
+    if (!mounted) return;
+    setState(() {
+      _windowsCamera = camera ?? '';
+      _changingCamera = false;
+      _error = null;
+    });
+    _openWindowsPreview();
+  }
+
+  Widget _buildWindowsStream() {
+    Widget video(int? texture, String placeholder) => Expanded(
+          child: ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: texture == null
+                  ? Text(placeholder)
+                  : AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Texture(textureId: texture),
+                    ),
+            ),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton(
+                onPressed: _onPageBack,
+                child: const Text('Back to studio'),
+              ),
+              FilledButton(
+                onPressed: !_windowsBusy
+                    ? (_previewReady && !_changingCamera
+                        ? _startWindowsStream
+                        : null)
+                    : _windowsRunning
+                        ? () => setState(() => _windowsRunning = false)
+                        : null,
+                child: Text(_windowsBusy ? 'Stop stream' : 'Start stream'),
+              ),
+              DropdownButton<String>(
+                value: _windowsCamera,
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('Default camera'),
+                  ),
+                  for (final camera in _windowsCameras.entries)
+                    DropdownMenuItem(
+                      value: camera.key,
+                      child: Text(camera.value),
+                    ),
+                ],
+                onChanged: _windowsBusy || _changingCamera
+                    ? null
+                    : _selectWindowsCamera,
+              ),
+              FilterChip(
+                label: const Text('Send output to OBS'),
+                selected: _sendToObs,
+                onSelected: (enabled) => setState(() => _sendToObs = enabled),
+              ),
+              if (_sendToObs)
+                OutlinedButton(
+                  onPressed: () => Clipboard.setData(
+                    ClipboardData(text: 'http://127.0.0.1:$_port/popout'),
+                  ),
+                  child: const Text('Copy OBS URL'),
+                ),
+              if (_creditsText case final credits?) Text(credits),
+              if (_nativeLive && _remainingSeconds != null)
+                Text('Time left: $_nativeTimeLeft'),
+              if (!_windowsBusy && !_previewReady && _windowsTask == null)
+                OutlinedButton(
+                  onPressed: () => _selectWindowsCamera(_windowsCamera),
+                  child: const Text('Preview camera'),
+                ),
+            ],
+          ),
+          if (_error case final error?)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(error),
+            ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                video(_cameraTexture, 'Camera preview'),
+                const SizedBox(width: 12),
+                video(
+                  _resultTexture,
+                  _windowsBusy
+                      ? 'Waiting for generated video…'
+                      : 'Generated video',
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Reads the model + prompt the backend chose for this session.
   void _applyStreamConfig(Map<String, dynamic> result) {
     final reference = result['reference_url'];
@@ -1483,7 +1768,12 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (newCredits != null) {
           _creditsRemaining = newCredits;
           context.read<AuthProvider>().updateCredits(newCredits);
-          _pushCreditsUpdate();
+          if (Platform.isWindows) {
+            _nativeCreditClock.reset();
+            setState(() {});
+          } else {
+            _pushCreditsUpdate();
+          }
         }
         if (stop) {
           final reason = code == 402
@@ -1506,6 +1796,13 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   void _stopPage(String reason) {
+    if (Platform.isWindows) {
+      setState(() {
+        _windowsRunning = false;
+        _error = reason;
+      });
+      return;
+    }
     _webViewController?.evaluateJavascript(
         source: 'stopStream(${jsonEncode(reason)});');
   }
@@ -1555,6 +1852,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   void _onPageBack() {
+    _windowsRunning = false;
     _stopHeartbeat();
     if (mounted) context.go('/playground');
   }
@@ -1570,6 +1868,25 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     }
     _server = server;
     server.listen(_handleRequest);
+  }
+
+  Future<void> _publishObsFrame(List<int> frame) async {
+    _latestFrameBytes = frame;
+    final clients = List<HttpResponse>.of(_sseClients);
+    await Future.wait(clients.map((client) async {
+      try {
+        client
+          ..write('--frame\r\n')
+          ..write('Content-Type: image/jpeg\r\n')
+          ..write('Content-Length: ${frame.length}\r\n\r\n')
+          ..add(frame)
+          ..write('\r\n');
+        await client.flush().timeout(const Duration(milliseconds: 500));
+      } catch (_) {
+        _sseClients.remove(client);
+        unawaited(client.close().then<void>((_) {}, onError: (Object _) {}));
+      }
+    }));
   }
 
   Future<void> _handleRequest(HttpRequest req) async {
@@ -1634,7 +1951,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
       // ── JS POSTs raw binary JPEG frames here — fanned to MJPEG clients ────
       case '/push':
-        if (req.method != 'POST') {
+        if (Platform.isWindows || req.method != 'POST') {
           req.response
             ..statusCode = 405
             ..close();
@@ -2786,7 +3103,9 @@ window.addEventListener('load', function() {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (_phase == _Phase.ready && _port != null)
+          if (_phase == _Phase.ready && Platform.isWindows)
+            _buildWindowsStream()
+          else if (_phase == _Phase.ready && _port != null)
             InAppWebView(
               initialUrlRequest: URLRequest(
                 url: WebUri('http://127.0.0.1:$_port'),
@@ -2963,26 +3282,6 @@ window.addEventListener('load', function() {
                 runSpacing: 12,
                 alignment: WrapAlignment.center,
                 children: [
-                  if (_webView2Missing)
-                    OutlinedButton(
-                      onPressed: () async {
-                        if (await launchUrl(_webView2Download,
-                            mode: LaunchMode.externalApplication)) {
-                          return;
-                        }
-                        if (!mounted) return;
-                        await Clipboard.setData(
-                          ClipboardData(text: _webView2Download.toString()),
-                        );
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('WebView2 download link copied.'),
-                          ),
-                        );
-                      },
-                      child: const Text('Download WebView2'),
-                    ),
                   OutlinedButton(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.screenText,

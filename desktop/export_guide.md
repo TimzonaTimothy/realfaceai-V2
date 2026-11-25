@@ -89,6 +89,9 @@ flutter build windows --release
 ```
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-Windows streaming uses the WebView2 Runtime installed on the PC. If the runtime
-is missing, select **Download WebView2** on the streaming screen, install it
-from Microsoft, then select **Try again**.
+This Windows test build uses native Xmax X2.1 streaming. The first build
+downloads the pinned Windows SDK from GitHub and verifies its SHA-256 hash.
+
+Open the streaming screen and wait for the camera preview before selecting
+**Start stream**. To test OBS, enable **Send output to OBS** and paste the
+copied URL into an OBS Browser Source.
