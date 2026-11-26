@@ -2550,15 +2550,77 @@ const obsVirtualCameraSteps = document.getElementById('obsVirtualCameraSteps');
 const obsHelp       = document.getElementById('obsHelp');
 const obsCopyStatus = document.getElementById('obsCopyStatus');
 
+let aiOutputWindow = null;
+let aiOutputVideo = null;
+
+function syncAiOutput() {
+  if (!aiOutputWindow || aiOutputWindow.closed || !aiOutputVideo) return;
+  const stream = remoteVideo.srcObject;
+  if (!stream || aiOutputVideo.srcObject === stream) return;
+  aiOutputVideo.srcObject = stream;
+  aiOutputVideo.play().catch(() => {});
+}
+
+function closeAiOutput() {
+  if (aiOutputVideo) aiOutputVideo.srcObject = null;
+  aiOutputVideo = null;
+  if (aiOutputWindow && !aiOutputWindow.closed) aiOutputWindow.close();
+  aiOutputWindow = null;
+}
+
+function openAiOutput() {
+  if (!remoteVideo.srcObject) return;
+  if (aiOutputWindow && !aiOutputWindow.closed) {
+    syncAiOutput();
+    aiOutputWindow.focus();
+    return;
+  }
+
+  // Open synchronously within the click so browsers allow the pop-up.
+  const output = window.open('', 'realface-ai-output', 'popup,width=960,height=540');
+  if (!output) {
+    obsWaiting.textContent = 'Allow pop-ups for this studio, then try again.';
+    obsWaiting.hidden = false;
+    return;
+  }
+  aiOutputWindow = output;
+  const doc = output.document;
+  doc.title = 'RealFaceAI AI Output';
+  doc.body.style.cssText = 'margin:0;height:100vh;background:#000;overflow:hidden';
+  const video = doc.createElement('video');
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain';
+  doc.body.replaceChildren(video);
+  aiOutputVideo = video;
+  syncAiOutput();
+  obsWaiting.textContent = 'In OBS, use Window Capture and select RealFaceAI AI Output.';
+  obsWaiting.hidden = false;
+}
+
+if (IS_WINDOWS) {
+  obsLabel.textContent = 'Open AI Output';
+  obsWaiting.textContent = 'Start streaming to open the generated video in a separate window.';
+  remoteVideo.addEventListener('loadedmetadata', syncAiOutput);
+  window.addEventListener('pagehide', closeAiOutput);
+}
+
 remoteVideo.addEventListener('playing', () => {
   if (!realtime) return;
   obsBtn.disabled = false;
-  obsWaiting.hidden = true;
+  if (IS_WINDOWS) {
+    syncAiOutput();
+    obsWaiting.textContent = 'Use Window Capture in OBS to capture the AI Output window.';
+    obsWaiting.hidden = false;
+  } else {
+    obsWaiting.hidden = true;
+  }
 });
 
 function _obsUiOff() {
   obsBtn.classList.remove('active');
-  obsLabel.textContent      = 'Send output to OBS';
+  obsLabel.textContent      = IS_WINDOWS ? 'Open AI Output' : 'Send output to OBS';
   obsUrlBadge.style.display = 'none';
   obsUrlInput.value         = '';
   obsSteps.hidden = true;
@@ -2572,11 +2634,17 @@ function resetObsOutput() {
   _stopObsRelay();
   _obsUiOff();
   obsBtn.disabled = true;
-  obsWaiting.textContent = 'Start Realtime to send live video to OBS.';
+  obsWaiting.textContent = IS_WINDOWS
+      ? 'Start streaming to open the generated video in a separate window.'
+      : 'Start Realtime to send live video to OBS.';
   obsWaiting.hidden = false;
 }
 
 window.toggleObs = function() {
+  if (IS_WINDOWS) {
+    openAiOutput();
+    return;
+  }
   if (_obsRelayActive) {
     _stopObsRelay();
     _obsUiOff();
@@ -2696,6 +2764,7 @@ function friendlySdkError(e) {
 
 // Ends the SDK session; our camera tracks are stopped by the caller.
 function teardownSession() {
+  closeAiOutput();
   const rt = realtime;
   realtime = null;
   rtLocal  = null;
