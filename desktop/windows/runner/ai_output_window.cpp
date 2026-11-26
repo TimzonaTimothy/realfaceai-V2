@@ -74,7 +74,7 @@ class OutputWindow {
     const int y = work_area.top + std::max(0, static_cast<int>(
         (work_area.bottom - work_area.top - height) / 2));
     const auto window = CreateWindowExW(
-        WS_EX_APPWINDOW, kClass, L"RealFaceAI Generated Video",
+        WS_EX_APPWINDOW, kClass, L"RealFaceAI Video Only (OBS)",
         WS_POPUP, x, y, width, height, nullptr, nullptr, instance, this);
     window_.store(window);
     started.set_value(window != nullptr);

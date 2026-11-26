@@ -1311,6 +1311,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // Worker rt.js starts next to itself (./frame-metadata-worker.js) in Chrome.
   // Without it the encoded-frame pipeline stalls and no AI video arrives.
   Uint8List? _workerBytes;
+  Uint8List? _aiOutputWorkerBytes;
 
   // Content fingerprint of rt.js, added to its URL (?v=…). The WebView caches
   // rt.js on disk across launches, so without this a replaced SDK file keeps
@@ -1378,6 +1379,14 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     } catch (e) {
       debugPrint('[RealtimeScreen] WARNING: frame-metadata-worker.js '
           'not found: $e');
+    }
+    if (Platform.isWindows) {
+      try {
+        final bytes = await rootBundle.load('assets/js/ai-output-worker.js');
+        _aiOutputWorkerBytes = bytes.buffer.asUint8List();
+      } catch (error) {
+        debugPrint('[RealtimeScreen] AI output worker unavailable: $error');
+      }
     }
   }
 
@@ -1603,11 +1612,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       if (_studioStatusSocket == socket) {
         _studioStatusSocket = null;
         _browserContact = DateTime.now();
-        if (socket.closeCode == WebSocketStatus.normalClosure ||
-            socket.closeCode == WebSocketStatus.goingAway) {
-          _closeWindowsOutput();
-          _stopHeartbeat();
-        }
       }
     }
   }
@@ -1795,6 +1799,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (packet.length > 8 + 960 * 540 * 4) break;
         final bytes = packet is Uint8List ? packet : Uint8List.fromList(packet);
         if (!_windowsAiOutput.present(bytes)) break;
+        _browserContact = DateTime.now();
         socket.add('ready');
       }
     } catch (error) {
@@ -1875,6 +1880,18 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
             ..add(sdk)
             ..close();
         }
+
+      case '/static/ai-output-worker.js':
+        final worker = _aiOutputWorkerBytes;
+        if (!Platform.isWindows || worker == null) {
+          req.response.statusCode = HttpStatus.notFound;
+        } else {
+          req.response
+            ..headers.contentType = ContentType('application', 'javascript')
+            ..headers.set('Cache-Control', 'no-store')
+            ..add(worker);
+        }
+        await req.response.close();
 
       case '/static/frame-metadata-worker.js':
         final worker = _workerBytes;
@@ -2087,7 +2104,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>RealFaceAI · Live</title>
+<title>${Platform.isWindows ? 'RealFaceAI Studio - Controls' : 'RealFaceAI · Live'}</title>
 <style>
   :root {
     /* RealFaceAI monitor palette (mirrors AppColors) */
@@ -2705,9 +2722,12 @@ const obsHelp       = document.getElementById('obsHelp');
 const obsCopyStatus = document.getElementById('obsCopyStatus');
 
 let aiOutputSocket = null;
+let aiOutputWorker = null;
 let aiOutputCallback = null;
 
 function closeAiOutput() {
+  aiOutputWorker?.terminate();
+  aiOutputWorker = null;
   const socket = aiOutputSocket;
   aiOutputSocket = null;
   if (aiOutputCallback !== null) {
@@ -2717,10 +2737,57 @@ function closeAiOutput() {
   socket?.close();
 }
 
+function outputIsOpen() {
+  return aiOutputWorker !== null || aiOutputSocket !== null;
+}
+
+function showAiOutputReady() {
+  obsWaiting.textContent = 'Capture “RealFaceAI Video Only (OBS)” from RealFaceAI.exe. Set Window Match Priority to “Window title must match”.';
+}
+
+function showAiOutputClosed(message) {
+  closeAiOutput();
+  obsBtn.disabled = !_sessionStarted;
+  obsWaiting.textContent = message;
+}
+
+function openTrackOutput(url, track) {
+  if (typeof MediaStreamTrackProcessor !== 'function') return false;
+  let worker;
+  let readable;
+  try {
+    worker = new Worker(SERVER + '/static/ai-output-worker.js');
+    readable = new MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable;
+    worker.postMessage({ readable, url: url.href }, [readable]);
+  } catch (_) {
+    worker?.terminate();
+    readable?.cancel().catch(() => {});
+    return false;
+  }
+  aiOutputWorker = worker;
+  worker.onmessage = ({ data }) => {
+    if (aiOutputWorker !== worker) return;
+    if (data === 'ready') showAiOutputReady();
+    if (data === 'closed' || data === 'failed') {
+      showAiOutputClosed('The video-only window closed. Select Open AI Output to reopen it.');
+    }
+  };
+  worker.onerror = () => {
+    if (aiOutputWorker !== worker) return;
+    showAiOutputClosed('Could not open video-only capture. Reload the studio and try again.');
+  };
+  return true;
+}
+
 function openAiOutput() {
-  if (!remoteVideo.srcObject || aiOutputSocket) return;
+  const track = remoteVideo.srcObject?.getVideoTracks?.()[0];
+  if (!track || outputIsOpen()) return;
   const url = new URL(SERVER + '/output-frames');
   url.protocol = 'ws:';
+  obsBtn.disabled = true;
+  obsWaiting.textContent = 'Opening AI Output…';
+  obsWaiting.hidden = false;
+  if (openTrackOutput(url, track)) return;
   const socket = new WebSocket(url);
   aiOutputSocket = socket;
   const canvas = document.createElement('canvas');
@@ -2764,7 +2831,7 @@ function openAiOutput() {
   socket.onmessage = () => {
     if (aiOutputSocket !== socket) return;
     pending = false;
-    obsWaiting.textContent = 'In OBS Window Capture, select RealFaceAI Generated Video and match the exact window title.';
+    showAiOutputReady();
   };
   socket.onclose = () => {
     if (aiOutputSocket !== socket) return;
@@ -2782,9 +2849,9 @@ if (IS_WINDOWS) {
 
 remoteVideo.addEventListener('playing', () => {
   if (!realtime) return;
-  obsBtn.disabled = IS_WINDOWS && aiOutputSocket !== null;
+  obsBtn.disabled = IS_WINDOWS && outputIsOpen();
   obsWaiting.hidden = !IS_WINDOWS;
-  if (IS_WINDOWS && !aiOutputSocket) {
+  if (IS_WINDOWS && !outputIsOpen()) {
     obsWaiting.textContent = 'Open the AI Output window for OBS Window Capture.';
   }
 });

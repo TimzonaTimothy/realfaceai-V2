@@ -92,7 +92,7 @@ The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
 On Windows, RealFaceAI opens its streaming studio in your default browser.
 Keep the desktop app open while streaming. For OBS, select **Open AI Output**
 in the browser studio once generated video is playing. Add a **Window Capture**
-source in OBS and choose **RealFaceAI Generated Video**. Set **Window Match
+source in OBS and choose **RealFaceAI Video Only (OBS)** from `RealFaceAI.exe`. Set **Window Match
 Priority** to **Window title must match** so OBS won't fall back to the browser
 studio. The native window opens without a title bar and shows only generated video. Drag the window to move
 it and press **Esc** to close it. Keep the browser studio visible while

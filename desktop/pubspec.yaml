@@ -93,6 +93,7 @@ flutter:
   assets:
     - assets/js/rt.js
     - assets/js/frame-metadata-worker.js
+    - assets/js/ai-output-worker.js
     - assets/brand/
     - assets/icon/app_icon.png
     - assets/images/logo.png
