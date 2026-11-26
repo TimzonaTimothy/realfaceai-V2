@@ -1220,6 +1220,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
+import '../../services/windows_ai_output.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/error_handler.dart';
 
@@ -1274,6 +1275,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   DateTime? _browserContact;
   int _creditRevision = 0;
   bool _browserRetrying = false;
+  WebSocket? _aiOutputSocket;
+  final _windowsAiOutput = WindowsAiOutput();
 
   Uri get _studioUri => Uri.parse('http://127.0.0.1:$_port$_studioPath');
 
@@ -1326,6 +1329,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   @override
   void dispose() {
+    _closeWindowsOutput();
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1530,6 +1534,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         _browserContact = DateTime.now();
       case 'stop':
       case 'back':
+        _closeWindowsOutput();
         _stopHeartbeat();
       case 'retry':
         if (_browserRetrying || _heartbeatTimer != null) {
@@ -1695,6 +1700,47 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     server.listen(_handleRequest);
   }
 
+  void _closeWindowsOutput() {
+    final socket = _aiOutputSocket;
+    if (socket == null) return;
+    _aiOutputSocket = null;
+    _windowsAiOutput.close();
+    unawaited(socket.close().then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  Future<void> _handleWindowsOutput(HttpRequest request) async {
+    if (!mounted ||
+        _heartbeatTimer == null ||
+        _aiOutputSocket != null ||
+        request.headers.value('origin') != _studioUri.origin ||
+        !WebSocketTransformer.isUpgradeRequest(request)) {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+      return;
+    }
+
+    final socket = await WebSocketTransformer.upgrade(request,
+        compression: CompressionOptions.compressionOff);
+    if (!mounted || _heartbeatTimer == null || _aiOutputSocket != null) {
+      await socket.close();
+      return;
+    }
+    _aiOutputSocket = socket;
+    try {
+      await for (final packet in socket) {
+        if (_aiOutputSocket != socket || packet is! List<int>) break;
+        if (packet.length > 8 + 960 * 540 * 4) break;
+        final bytes = packet is Uint8List ? packet : Uint8List.fromList(packet);
+        if (!_windowsAiOutput.present(bytes)) break;
+        socket.add('ready');
+      }
+    } catch (error) {
+      debugPrint('[RealtimeScreen] AI Output disconnected: $error');
+    } finally {
+      if (_aiOutputSocket == socket) _closeWindowsOutput();
+    }
+  }
+
   Future<void> _handleRequest(HttpRequest req) async {
     var path = req.uri.path;
     if (Platform.isWindows) {
@@ -1708,6 +1754,10 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       req.response.headers
         ..set('Referrer-Policy', 'no-referrer')
         ..set('Content-Security-Policy', "frame-ancestors 'none'");
+      if (path == '/output-frames') {
+        await _handleWindowsOutput(req);
+        return;
+      }
       if (path.startsWith('/event/')) {
         await _handleStudioEvent(req, path.substring('/event/'.length));
         return;
@@ -2550,89 +2600,91 @@ const obsVirtualCameraSteps = document.getElementById('obsVirtualCameraSteps');
 const obsHelp       = document.getElementById('obsHelp');
 const obsCopyStatus = document.getElementById('obsCopyStatus');
 
-let aiOutputWindow = null;
-let aiOutputVideo = null;
-
-function syncAiOutput() {
-  if (!aiOutputWindow || aiOutputWindow.closed || !aiOutputVideo) return;
-  const stream = remoteVideo.srcObject;
-  if (!stream || aiOutputVideo.srcObject === stream) return;
-  aiOutputVideo.srcObject = stream;
-  aiOutputVideo.play().catch(() => {});
-}
+let aiOutputSocket = null;
+let aiOutputCallback = null;
 
 function closeAiOutput() {
-  if (aiOutputVideo) aiOutputVideo.srcObject = null;
-  aiOutputVideo = null;
-  if (aiOutputWindow && !aiOutputWindow.closed) aiOutputWindow.close();
-  aiOutputWindow = null;
+  const socket = aiOutputSocket;
+  aiOutputSocket = null;
+  if (aiOutputCallback !== null) {
+    remoteVideo.cancelVideoFrameCallback(aiOutputCallback);
+    aiOutputCallback = null;
+  }
+  socket?.close();
 }
 
 function openAiOutput() {
-  if (!remoteVideo.srcObject) return;
-  if (aiOutputWindow && !aiOutputWindow.closed) {
-    syncAiOutput();
-    aiOutputWindow.focus();
-    return;
+  if (!remoteVideo.srcObject || aiOutputSocket) return;
+  const url = new URL(SERVER + '/output-frames');
+  url.protocol = 'ws:';
+  const socket = new WebSocket(url);
+  aiOutputSocket = socket;
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  let pending = false;
+  let lastFrameAt = -Infinity;
+
+  function sendFrame(now) {
+    aiOutputCallback = null;
+    if (aiOutputSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
+    aiOutputCallback = remoteVideo.requestVideoFrameCallback(sendFrame);
+    if (pending || now - lastFrameAt < 40 ||
+        !remoteVideo.videoWidth || !remoteVideo.videoHeight) return;
+    const scale = Math.min(1, 960 / remoteVideo.videoWidth, 540 / remoteVideo.videoHeight);
+    const width = Math.max(1, Math.floor(remoteVideo.videoWidth * scale));
+    const height = Math.max(1, Math.floor(remoteVideo.videoHeight * scale));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    try {
+      context.drawImage(remoteVideo, 0, 0, width, height);
+      const header = new DataView(new ArrayBuffer(8));
+      header.setUint32(0, width, true);
+      header.setUint32(4, height, true);
+      pending = true;
+      lastFrameAt = now;
+      socket.send(new Blob([header.buffer, context.getImageData(0, 0, width, height).data]));
+    } catch (_) {
+      closeAiOutput();
+      obsWaiting.textContent = 'Could not send video to the AI Output window.';
+      obsBtn.disabled = !_sessionStarted;
+    }
   }
 
-  // Open synchronously within the click so browsers allow the pop-up.
-  const output = window.open('', 'realface-ai-output', 'popup,width=960,height=540');
-  if (!output) {
-    obsWaiting.textContent = 'Allow pop-ups for this studio, then try again.';
-    obsWaiting.hidden = false;
-    return;
-  }
-  aiOutputWindow = output;
-  const doc = output.document;
-  doc.title = 'RealFaceAI AI Output';
-  doc.body.style.cssText = 'margin:0;height:100vh;background:#000;overflow:hidden';
-  const video = doc.createElement('video');
-  video.autoplay = true;
-  video.muted = true;
-  video.playsInline = true;
-  video.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain';
-  video.setAttribute('aria-label', 'Generated video. Press F for video-only fullscreen.');
-  async function toggleVideoFullscreen() {
-    try {
-      if (doc.fullscreenElement) await doc.exitFullscreen();
-      else await video.requestFullscreen();
-    } catch (_) {
-      obsWaiting.textContent = 'Fullscreen is unavailable in this browser. In OBS, enable Client Area if available.';
-      obsWaiting.hidden = false;
-    }
-  }
-  video.addEventListener('dblclick', toggleVideoFullscreen);
-  doc.addEventListener('keydown', event => {
-    if (!event.repeat && event.key.toLowerCase() === 'f') {
-      void toggleVideoFullscreen();
-    }
-  });
-  doc.body.replaceChildren(video);
-  aiOutputVideo = video;
-  syncAiOutput();
-  obsWaiting.textContent = 'Select RealFaceAI AI Output in OBS. Double-click the video for fullscreen.';
+  obsBtn.disabled = true;
+  obsWaiting.textContent = 'Opening AI Output…';
   obsWaiting.hidden = false;
+  socket.onopen = () => {
+    if (aiOutputSocket !== socket) return;
+    aiOutputCallback = remoteVideo.requestVideoFrameCallback(sendFrame);
+  };
+  socket.onmessage = () => {
+    if (aiOutputSocket !== socket) return;
+    pending = false;
+    obsWaiting.textContent = 'In OBS Window Capture, select RealFaceAI AI Output.';
+  };
+  socket.onclose = () => {
+    if (aiOutputSocket !== socket) return;
+    closeAiOutput();
+    obsBtn.disabled = !_sessionStarted;
+    obsWaiting.textContent = 'AI Output closed. Select Open AI Output to reopen it.';
+  };
 }
 
 if (IS_WINDOWS) {
   obsLabel.textContent = 'Open AI Output';
   obsWaiting.textContent = 'Start streaming to open the generated video in a separate window.';
-  remoteVideo.addEventListener('loadedmetadata', syncAiOutput);
   window.addEventListener('pagehide', closeAiOutput);
 }
 
 remoteVideo.addEventListener('playing', () => {
   if (!realtime) return;
-  obsBtn.disabled = false;
-  if (IS_WINDOWS) {
-    syncAiOutput();
-    obsWaiting.textContent = 'Use Window Capture in OBS. Double-click the pop-out video for fullscreen.';
-    obsWaiting.hidden = false;
-  } else {
-    obsWaiting.hidden = true;
+  obsBtn.disabled = IS_WINDOWS && aiOutputSocket !== null;
+  obsWaiting.hidden = !IS_WINDOWS;
+  if (IS_WINDOWS && !aiOutputSocket) {
+    obsWaiting.textContent = 'Open the AI Output window for OBS Window Capture.';
   }
 });
+
 
 function _obsUiOff() {
   obsBtn.classList.remove('active');
