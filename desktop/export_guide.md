@@ -90,9 +90,11 @@ flutter build windows --release
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
 On Windows, RealFaceAI opens its streaming studio in your default browser.
-Keep the desktop app open while streaming. For OBS, select **Open AI Output**
-in the browser studio once generated video is playing. Add a **Window Capture**
-source in OBS and choose **RealFaceAI AI Output**.
+Keep the desktop app open while streaming. In the browser launcher, select
+**Open AI Output**, choose a camera in that window, and start streaming. Select
+**Enter OBS capture mode** to show only generated video. Press **Esc** to restore
+the controls. In OBS, add a **Window Capture** source for **RealFaceAI AI Output**.
+You can minimize the browser launcher while keeping the AI Output window visible.
 
 ### Build a signed installer for direct downloads
 
