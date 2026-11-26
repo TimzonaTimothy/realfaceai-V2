@@ -2592,10 +2592,26 @@ function openAiOutput() {
   video.muted = true;
   video.playsInline = true;
   video.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain';
+  video.setAttribute('aria-label', 'Generated video. Press F for video-only fullscreen.');
+  async function toggleVideoFullscreen() {
+    try {
+      if (doc.fullscreenElement) await doc.exitFullscreen();
+      else await video.requestFullscreen();
+    } catch (_) {
+      obsWaiting.textContent = 'Fullscreen is unavailable in this browser. In OBS, enable Client Area if available.';
+      obsWaiting.hidden = false;
+    }
+  }
+  video.addEventListener('dblclick', toggleVideoFullscreen);
+  doc.addEventListener('keydown', event => {
+    if (!event.repeat && event.key.toLowerCase() === 'f') {
+      void toggleVideoFullscreen();
+    }
+  });
   doc.body.replaceChildren(video);
   aiOutputVideo = video;
   syncAiOutput();
-  obsWaiting.textContent = 'In OBS, use Window Capture and select RealFaceAI AI Output.';
+  obsWaiting.textContent = 'Select RealFaceAI AI Output in OBS. Double-click the video for fullscreen.';
   obsWaiting.hidden = false;
 }
 
@@ -2611,7 +2627,7 @@ remoteVideo.addEventListener('playing', () => {
   obsBtn.disabled = false;
   if (IS_WINDOWS) {
     syncAiOutput();
-    obsWaiting.textContent = 'Use Window Capture in OBS to capture the AI Output window.';
+    obsWaiting.textContent = 'Use Window Capture in OBS. Double-click the pop-out video for fullscreen.';
     obsWaiting.hidden = false;
   } else {
     obsWaiting.hidden = true;
