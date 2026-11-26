@@ -81,12 +81,21 @@ Your installer will be generated in `build\windows\x64\runner\Release\`.
 
 ## Build the Inno Setup installer
 
+Install [Inno Setup 6.7.0](https://github.com/jrsoftware/issrc/releases/tag/is-6_7_0)
+to match the compiler used for the CamifyAI comparison. GitHub Actions downloads
+this exact release and checks its SHA-256 hash.
+
 Run these commands in PowerShell from the `desktop` directory:
 
 ```powershell
+$iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+(Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
 flutter build windows --release
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" .\installer.iss
+& $iscc .\installer.iss
 ```
+
+Confirm the compiler reports version 6.7.0 before building. Set `$iscc` to
+the corresponding path if you installed it in a different directory.
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
 On Windows, RealFaceAI opens its streaming studio in your default browser.

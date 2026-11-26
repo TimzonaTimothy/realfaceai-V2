@@ -59,18 +59,26 @@ jobs:
       - name: Build Flutter release
         run: flutter build windows --release --build-name=${{ steps.version.outputs.version }}
 
-      - name: Install Inno Setup
+      - name: Install Inno Setup 6.7.0
         shell: pwsh
         run: |
-          if (!(Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
-            choco install innosetup -y --no-progress
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.0.exe'
+          $installDir = Join-Path $env:RUNNER_TEMP 'Inno Setup 6.7.0'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_0/innosetup-6.7.0.exe' -OutFile $installer
+          $expectedHash = 'f45c7d68d1e660cf13877ec36738a5179ce72a33414f9959d35e99b68c52a697'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -ne $expectedHash) {
+            throw 'Inno Setup 6.7.0 installer checksum mismatch.'
           }
+          $arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$installDir`""
+          $process = Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Inno Setup installation exited with code $($process.ExitCode)." }
+          $compiler = Get-Item -LiteralPath (Join-Path $installDir 'ISCC.exe')
+          "INNO_COMPILER=$($compiler.FullName)" >> $env:GITHUB_ENV
 
       # Before MSIX: msix writes its .msix into the Release folder, and the
       # installer packs that whole folder.
       - name: Compile installer
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DAppVer=${{ steps.version.outputs.version }}" installer.iss'
+        run: '& $env:INNO_COMPILER "/DAppVer=${{ steps.version.outputs.version }}" installer.iss'
 
       # Answers "No" to the certificate prompt; reuses the build above.
       - name: Create MSIX
