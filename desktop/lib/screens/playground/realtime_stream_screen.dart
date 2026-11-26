@@ -1867,10 +1867,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         // Unknown static file: a real 404, not the HTML page (a script
         // served as text/html fails with a confusing MIME error).
         if (path.startsWith('/static/') ||
-            (Platform.isWindows &&
-                path != '' &&
-                path != '/' &&
-                path != '/output')) {
+            (Platform.isWindows && path.isNotEmpty && path != '/')) {
           req.response
             ..statusCode = 404
             ..close();
@@ -1880,9 +1877,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           ..statusCode = 200
           ..headers.set('Content-Type', 'text/html; charset=utf-8')
           ..headers.set('Cache-Control', 'no-store')
-          ..write(Platform.isWindows && path != '/output'
-              ? _buildWindowsLauncher()
-              : _buildHtml())
+          ..write(_buildHtml())
           ..close();
     }
   }
@@ -1907,47 +1902,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   // ── HTML builders ─────────────────────────────────────────────────────────
-
-  String _buildWindowsLauncher() => '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RealFaceAI Streaming Studio</title>
-<style>
-  body { margin:0; min-height:100vh; display:grid; place-items:center;
-    background:#0f1117; color:#f2f4f8; font:16px system-ui,sans-serif; }
-  main { max-width:420px; padding:28px; }
-  p { line-height:1.5; color:#bac1cf; }
-  button, a { font:inherit; }
-  button { background:#3a3dff; color:white; border:0; border-radius:8px;
-    padding:10px 16px; cursor:pointer; }
-  a { color:#a9abff; }
-</style>
-</head>
-<body>
-<main>
-  <h1>RealFaceAI Streaming Studio</h1>
-  <p>Open the AI Output window to select your camera and start streaming.
-    You can minimize this launcher while the output window stays open.</p>
-  <button id="openOutput">Open AI Output</button>
-  <p id="popupFallback" hidden>
-    The browser blocked the pop-up. <a href="$_studioPath/output">Open the studio here</a>.
-  </p>
-</main>
-<script>
-let output;
-document.getElementById('openOutput').addEventListener('click', () => {
-  if (output && !output.closed) {
-    output.focus();
-    return;
-  }
-  output = window.open('$_studioPath/output', 'realface-ai-output', 'popup,width=1200,height=720');
-  document.getElementById('popupFallback').hidden = !!output;
-});
-</script>
-</body>
-</html>''';
 
   String _buildPopoutHtml() => '''<!DOCTYPE html>
 <html>
@@ -2016,7 +1970,7 @@ document.getElementById('openOutput').addEventListener('click', () => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${Platform.isWindows ? 'RealFaceAI AI Output' : 'RealFaceAI · Live'}</title>
+<title>RealFaceAI · Live</title>
 <style>
   :root {
     /* RealFaceAI monitor palette (mirrors AppColors) */
@@ -2189,12 +2143,6 @@ document.getElementById('openOutput').addEventListener('click', () => {
     .stage { flex:none; height:52vh; min-height:240px; }
     .side  { width:auto; overflow:visible; padding:0 12px 12px; }
   }
-  body.capture-mode .topbar,
-  body.capture-mode .side,
-  body.capture-mode .live-tag { display:none; }
-  body.capture-mode .workspace { overflow:hidden; }
-  body.capture-mode .stage { flex:1; width:100%; height:100%; min-height:0; padding:0; }
-  body.capture-mode .screen { border:0; border-radius:0; background:#000; }
 </style>
 
 <!-- SDK served locally — no external URLs, no provider branding in traffic -->
@@ -2602,23 +2550,68 @@ const obsVirtualCameraSteps = document.getElementById('obsVirtualCameraSteps');
 const obsHelp       = document.getElementById('obsHelp');
 const obsCopyStatus = document.getElementById('obsCopyStatus');
 
-function exitCaptureMode() {
-  document.body.classList.remove('capture-mode');
+let aiOutputWindow = null;
+let aiOutputVideo = null;
+
+function syncAiOutput() {
+  if (!aiOutputWindow || aiOutputWindow.closed || !aiOutputVideo) return;
+  const stream = remoteVideo.srcObject;
+  if (!stream || aiOutputVideo.srcObject === stream) return;
+  aiOutputVideo.srcObject = stream;
+  aiOutputVideo.play().catch(() => {});
+}
+
+function closeAiOutput() {
+  if (aiOutputVideo) aiOutputVideo.srcObject = null;
+  aiOutputVideo = null;
+  if (aiOutputWindow && !aiOutputWindow.closed) aiOutputWindow.close();
+  aiOutputWindow = null;
+}
+
+function openAiOutput() {
+  if (!remoteVideo.srcObject) return;
+  if (aiOutputWindow && !aiOutputWindow.closed) {
+    syncAiOutput();
+    aiOutputWindow.focus();
+    return;
+  }
+
+  // Open synchronously within the click so browsers allow the pop-up.
+  const output = window.open('', 'realface-ai-output', 'popup,width=960,height=540');
+  if (!output) {
+    obsWaiting.textContent = 'Allow pop-ups for this studio, then try again.';
+    obsWaiting.hidden = false;
+    return;
+  }
+  aiOutputWindow = output;
+  const doc = output.document;
+  doc.title = 'RealFaceAI AI Output';
+  doc.body.style.cssText = 'margin:0;height:100vh;background:#000;overflow:hidden';
+  const video = doc.createElement('video');
+  video.autoplay = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.style.cssText = 'display:block;width:100%;height:100%;object-fit:contain';
+  doc.body.replaceChildren(video);
+  aiOutputVideo = video;
+  syncAiOutput();
+  obsWaiting.textContent = 'In OBS, use Window Capture and select RealFaceAI AI Output.';
+  obsWaiting.hidden = false;
 }
 
 if (IS_WINDOWS) {
-  obsLabel.textContent = 'Enter OBS capture mode';
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape') exitCaptureMode();
-  });
-  document.getElementById('remoteView').addEventListener('dblclick', exitCaptureMode);
+  obsLabel.textContent = 'Open AI Output';
+  obsWaiting.textContent = 'Start streaming to open the generated video in a separate window.';
+  remoteVideo.addEventListener('loadedmetadata', syncAiOutput);
+  window.addEventListener('pagehide', closeAiOutput);
 }
 
 remoteVideo.addEventListener('playing', () => {
   if (!realtime) return;
   obsBtn.disabled = false;
   if (IS_WINDOWS) {
-    obsWaiting.textContent = 'Use Window Capture in OBS. Press Esc to show the controls again.';
+    syncAiOutput();
+    obsWaiting.textContent = 'Use Window Capture in OBS to capture the AI Output window.';
     obsWaiting.hidden = false;
   } else {
     obsWaiting.hidden = true;
@@ -2627,7 +2620,7 @@ remoteVideo.addEventListener('playing', () => {
 
 function _obsUiOff() {
   obsBtn.classList.remove('active');
-  obsLabel.textContent      = IS_WINDOWS ? 'Enter OBS capture mode' : 'Send output to OBS';
+  obsLabel.textContent      = IS_WINDOWS ? 'Open AI Output' : 'Send output to OBS';
   obsUrlBadge.style.display = 'none';
   obsUrlInput.value         = '';
   obsSteps.hidden = true;
@@ -2642,14 +2635,14 @@ function resetObsOutput() {
   _obsUiOff();
   obsBtn.disabled = true;
   obsWaiting.textContent = IS_WINDOWS
-      ? 'Start streaming to enable OBS capture mode.'
+      ? 'Start streaming to open the generated video in a separate window.'
       : 'Start Realtime to send live video to OBS.';
   obsWaiting.hidden = false;
 }
 
 window.toggleObs = function() {
   if (IS_WINDOWS) {
-    document.body.classList.add('capture-mode');
+    openAiOutput();
     return;
   }
   if (_obsRelayActive) {
@@ -2771,7 +2764,7 @@ function friendlySdkError(e) {
 
 // Ends the SDK session; our camera tracks are stopped by the caller.
 function teardownSession() {
-  exitCaptureMode();
+  closeAiOutput();
   const rt = realtime;
   realtime = null;
   rtLocal  = null;
