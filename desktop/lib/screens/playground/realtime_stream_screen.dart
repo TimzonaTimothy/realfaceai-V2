@@ -1276,6 +1276,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   int _creditRevision = 0;
   bool _browserRetrying = false;
   WebSocket? _aiOutputSocket;
+  WebSocket? _studioStatusSocket;
   final _windowsAiOutput = WindowsAiOutput();
 
   Uri get _studioUri => Uri.parse('http://127.0.0.1:$_port$_studioPath');
@@ -1330,6 +1331,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   @override
   void dispose() {
     _closeWindowsOutput();
+    _closeStudioStatus();
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1535,6 +1537,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       case 'stop':
       case 'back':
         _closeWindowsOutput();
+        _closeStudioStatus();
         _stopHeartbeat();
       case 'retry':
         if (_browserRetrying || _heartbeatTimer != null) {
@@ -1554,15 +1557,64 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     request.response
       ..headers.contentType = ContentType.json
       ..headers.set('Cache-Control', 'no-store')
-      ..write(jsonEncode({
+      ..write(_studioStatusJson(ok: ok));
+    await request.response.close();
+    if (event == 'back') _onPageBack();
+  }
+
+  String _studioStatusJson({bool ok = true}) => jsonEncode({
         'ok': ok,
         'credits': _creditsText,
         'seconds': _remainingSeconds,
         'revision': _creditRevision,
         'stopReason': _browserStopReason,
-      }));
-    await request.response.close();
-    if (event == 'back') _onPageBack();
+      });
+
+  void _closeStudioStatus() {
+    final socket = _studioStatusSocket;
+    _studioStatusSocket = null;
+    if (socket != null) {
+      unawaited(socket.close().then<void>((_) {}, onError: (Object _) {}));
+    }
+  }
+
+  Future<void> _handleStudioStatus(HttpRequest request) async {
+    if (!mounted ||
+        _heartbeatTimer == null ||
+        request.headers.value('origin') != _studioUri.origin ||
+        !WebSocketTransformer.isUpgradeRequest(request)) {
+      request.response.statusCode = HttpStatus.forbidden;
+      await request.response.close();
+      return;
+    }
+    final socket = await WebSocketTransformer.upgrade(request);
+    if (!mounted || _heartbeatTimer == null || _studioStatusSocket != null) {
+      await socket.close();
+      return;
+    }
+    _studioStatusSocket = socket;
+    socket.pingInterval = const Duration(seconds: 15);
+    try {
+      socket.add(_studioStatusJson());
+      await socket.drain<void>();
+    } catch (error) {
+      debugPrint('[RealtimeScreen] Studio status connection closed: $error');
+    } finally {
+      if (_studioStatusSocket == socket) {
+        _studioStatusSocket = null;
+        _browserContact = DateTime.now();
+        if (socket.closeCode == WebSocketStatus.normalClosure ||
+            socket.closeCode == WebSocketStatus.goingAway) {
+          _closeWindowsOutput();
+          _stopHeartbeat();
+        }
+      }
+    }
+  }
+
+  void _pushStudioStatus() {
+    final socket = _studioStatusSocket;
+    if (socket?.readyState == WebSocket.open) socket!.add(_studioStatusJson());
   }
 
   /// Reads the model + prompt the backend chose for this session.
@@ -1580,13 +1632,17 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Heartbeat (deducts credits on backend every 10 s) ─────────────────────
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
+    var heartbeatInFlight = false;
     _heartbeatTimer =
         Timer.periodic(const Duration(seconds: 10), (timer) async {
+      if (heartbeatInFlight) return;
+      heartbeatInFlight = true;
       try {
         final contact = _browserContact;
         if (Platform.isWindows &&
+            _studioStatusSocket == null &&
             contact != null &&
-            DateTime.now().difference(contact).inSeconds >= 8) {
+            DateTime.now().difference(contact).inSeconds >= 35) {
           _stopPage(
               'The browser disconnected. Return to RealFaceAI to start a new session.');
           _stopHeartbeat();
@@ -1604,7 +1660,11 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           _creditsRemaining = newCredits;
           context.read<AuthProvider>().updateCredits(newCredits);
           _creditRevision++;
-          _pushCreditsUpdate();
+          if (Platform.isWindows) {
+            _pushStudioStatus();
+          } else {
+            _pushCreditsUpdate();
+          }
         }
         if (stop) {
           final reason = code == 402
@@ -1617,6 +1677,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         }
       } catch (e) {
         debugPrint('[RealtimeScreen] heartbeat failed: $e');
+      } finally {
+        heartbeatInFlight = false;
       }
     });
   }
@@ -1629,6 +1691,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   void _stopPage(String reason) {
     if (Platform.isWindows) {
       _browserStopReason = reason;
+      _pushStudioStatus();
       return;
     }
     _webViewController?.evaluateJavascript(
@@ -1754,6 +1817,10 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       req.response.headers
         ..set('Referrer-Policy', 'no-referrer')
         ..set('Content-Security-Policy', "frame-ancestors 'none'");
+      if (path == '/studio-status') {
+        await _handleStudioStatus(req);
+        return;
+      }
       if (path == '/output-frames') {
         await _handleWindowsOutput(req);
         return;
@@ -2350,29 +2417,65 @@ async function studioEvent(name) {
   const response = await fetch(SERVER + '/event/' + name, {
     method: name === 'status' ? 'GET' : 'POST',
     cache: 'no-store',
+    ...(name === 'status' ? { signal: AbortSignal.timeout(5000) } : {}),
   });
   if (!response.ok) throw new Error('RealFaceAI disconnected.');
   return response.json();
 }
 
-async function watchStudio(run) {
-  try {
-    const state = await studioEvent('status');
-    if (browserRun !== run || !_sessionStarted) return;
-    if (state.stopReason) {
-      window.stopStream(state.stopReason);
-      return;
-    }
-    if (lastCreditRevision !== state.revision) {
-      lastCreditRevision = state.revision;
-      window.updateStreamCredits(state.credits, state.seconds);
-    }
-    browserTimer = setTimeout(() => watchStudio(run), 1000);
-  } catch (_) {
-    if (browserRun === run && _sessionStarted) {
-      window.stopStream('RealFaceAI disconnected. Reopen the studio from the app.');
-    }
+let studioSocket = null;
+let studioDisconnectedAt = null;
+
+function updateStudioStatus(state) {
+  studioDisconnectedAt = null;
+  if (state.stopReason) {
+    window.stopStream(state.stopReason);
+    return;
   }
+  if (lastCreditRevision !== state.revision) {
+    lastCreditRevision = state.revision;
+    window.updateStreamCredits(state.credits, state.seconds);
+  }
+}
+
+function closeStudioStatus() {
+  clearTimeout(browserTimer);
+  const socket = studioSocket;
+  studioSocket = null;
+  socket?.close();
+}
+
+function watchStudio(run) {
+  if (browserRun !== run || !_sessionStarted) return;
+  const url = new URL(SERVER + '/studio-status');
+  url.protocol = 'ws:';
+  const socket = new WebSocket(url);
+  studioSocket = socket;
+  socket.onmessage = event => {
+    if (studioSocket === socket && browserRun === run && _sessionStarted) {
+      updateStudioStatus(JSON.parse(event.data));
+    }
+  };
+  socket.onclose = async () => {
+    if (studioSocket !== socket || browserRun !== run || !_sessionStarted) return;
+    studioSocket = null;
+    try {
+      const state = await studioEvent('status');
+      if (browserRun !== run || !_sessionStarted) return;
+      updateStudioStatus(state);
+    } catch (_) {
+      // A brief local connection failure shouldn't end the Xmax session.
+      if (browserRun !== run || !_sessionStarted) return;
+      studioDisconnectedAt ??= Date.now();
+      if (Date.now() - studioDisconnectedAt >= 30000) {
+        window.stopStream('RealFaceAI disconnected. Reopen the studio from the app.');
+        return;
+      }
+    }
+    if (browserRun === run && _sessionStarted) {
+      browserTimer = setTimeout(() => watchStudio(run), 2000);
+    }
+  };
 }
 
 function notifyApp(name, arg) {
@@ -2392,7 +2495,7 @@ function notifyApp(name, arg) {
     case 'onStreamStopped':
     case 'onError':
       browserRun++;
-      clearTimeout(browserTimer);
+      closeStudioStatus();
       void studioEvent('stop').catch(() => {});
       break;
     case 'onStreamRetry':
@@ -2402,7 +2505,7 @@ function notifyApp(name, arg) {
       }).catch(() => { errMsg.textContent = 'Open the studio again from RealFaceAI.'; });
     case 'onGoBack':
       browserRun++;
-      clearTimeout(browserTimer);
+      closeStudioStatus();
       document.body.textContent = 'Returned to RealFaceAI. You can close this tab.';
       void studioEvent('back').catch(() => {});
       break;
@@ -2413,6 +2516,7 @@ function notifyApp(name, arg) {
 
 if (IS_WINDOWS) {
   window.addEventListener('pagehide', () => {
+    closeStudioStatus();
     if (_sessionStarted) navigator.sendBeacon(SERVER + '/event/stop');
   });
 }
@@ -2660,7 +2764,7 @@ function openAiOutput() {
   socket.onmessage = () => {
     if (aiOutputSocket !== socket) return;
     pending = false;
-    obsWaiting.textContent = 'In OBS Window Capture, select RealFaceAI AI Output.';
+    obsWaiting.textContent = 'In OBS Window Capture, select RealFaceAI Generated Video and match the exact window title.';
   };
   socket.onclose = () => {
     if (aiOutputSocket !== socket) return;

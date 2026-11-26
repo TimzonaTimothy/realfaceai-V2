@@ -74,7 +74,7 @@ class OutputWindow {
     const int y = work_area.top + std::max(0, static_cast<int>(
         (work_area.bottom - work_area.top - height) / 2));
     const auto window = CreateWindowExW(
-        WS_EX_APPWINDOW, kClass, L"RealFaceAI AI Output",
+        WS_EX_APPWINDOW, kClass, L"RealFaceAI Generated Video",
         WS_POPUP, x, y, width, height, nullptr, nullptr, instance, this);
     window_.store(window);
     started.set_value(window != nullptr);
@@ -132,6 +132,9 @@ class OutputWindow {
     auto* self = reinterpret_cast<OutputWindow*>(
         GetWindowLongPtrW(window, GWLP_USERDATA));
     switch (message) {
+      case WM_NCCALCSIZE:
+      case WM_NCPAINT:
+        return 0;
       case WM_NCHITTEST:
         if (DefWindowProcW(window, message, wparam, lparam) == HTCLIENT) {
           return HTCAPTION;
