@@ -100,13 +100,9 @@ last command. Set `$iscc` to the corresponding path if you installed it in a
 different directory.
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-This Windows test build uses native Xmax X2.1 streaming. The first build
-downloads the pinned Windows SDK from GitHub and verifies its SHA-256 hash.
-
-Open the streaming screen and wait for the camera preview before selecting
-**Start stream**. When generated video is live, select **Open AI Output**.
-In OBS, add a **Window Capture** source and choose **RealFaceAI AI Output**.
-This separate window displays only generated video.
+Windows streaming uses the WebView2 Runtime installed on the PC. If the runtime
+is missing, select **Download WebView2** on the streaming screen, install it
+from Microsoft, then select **Try again**.
 
 ### Build a signed installer for direct downloads
 
