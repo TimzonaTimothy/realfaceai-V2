@@ -89,23 +89,24 @@ Run these commands in PowerShell from the `desktop` directory:
 
 ```powershell
 $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
-(Get-Item -LiteralPath $iscc).VersionInfo.ProductVersion
 flutter build windows --release
+& $iscc /O- .\installer.iss
 & $iscc .\installer.iss
 ```
 
-Confirm the compiler reports version 6.7.0 before building. Set `$iscc` to
-the corresponding path if you installed it in a different directory.
+The `/O-` check runs the compiler without writing an installer. Confirm its
+**Compiler engine version** line says **Inno Setup 6.7.0** before running the
+last command. Set `$iscc` to the corresponding path if you installed it in a
+different directory.
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-On Windows, RealFaceAI opens its streaming studio in your default browser.
-Keep the desktop app open while streaming. For OBS, select **Open AI Output**
-in the browser studio once generated video is playing. Add a **Window Capture**
-source in OBS and choose **RealFaceAI Video Only (OBS)** from `RealFaceAI.exe`. Set **Window Match
-Priority** to **Window title must match** so OBS won't fall back to the browser
-studio. The native window opens without a title bar and shows only generated video. Drag the window to move
-it and press **Esc** to close it. Keep the browser studio visible while
-streaming.
+This Windows test build uses native Xmax X2.1 streaming. The first build
+downloads the pinned Windows SDK from GitHub and verifies its SHA-256 hash.
+
+Open the streaming screen and wait for the camera preview before selecting
+**Start stream**. When generated video is live, select **Open AI Output**.
+In OBS, add a **Window Capture** source and choose **RealFaceAI AI Output**.
+This separate window displays only generated video.
 
 ### Build a signed installer for direct downloads
 

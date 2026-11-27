@@ -1216,11 +1216,10 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/api_service.dart';
 import '../../services/auth_provider.dart';
-import '../../services/windows_ai_output.dart';
+import '../../services/windows_xmax.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/error_handler.dart';
 
@@ -1268,18 +1267,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Phase ──────────────────────────────────────────────────────────────────
   _Phase _phase = _Phase.fetchingToken;
   String? _error;
-  final _studioPath =
-      '/studio/${List.generate(24, (_) => _secureRandom.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
-  static final _secureRandom = Random.secure();
-  String? _browserStopReason;
-  DateTime? _browserContact;
-  int _creditRevision = 0;
-  bool _browserRetrying = false;
-  WebSocket? _aiOutputSocket;
-  WebSocket? _studioStatusSocket;
-  final _windowsAiOutput = WindowsAiOutput();
-
-  Uri get _studioUri => Uri.parse('http://127.0.0.1:$_port$_studioPath');
 
   // ── Token data ─────────────────────────────────────────────────────────────
   String? _streamToken;
@@ -1304,6 +1291,24 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   InAppWebViewController? _webViewController;
 
   Timer? _heartbeatTimer;
+  Future<void>? _windowsTask;
+  bool _windowsRunning = false;
+  bool _windowsBusy = false;
+  bool _previewReady = false;
+  bool _nativeLive = false;
+  bool _changingCamera = false;
+  int? _windowsOutputSession;
+  String _windowsCamera = '';
+  Map<String, String> _windowsCameras = {};
+  int? _cameraTexture;
+  int? _resultTexture;
+  final _nativeCreditClock = Stopwatch();
+
+  String get _nativeTimeLeft {
+    final seconds =
+        max(0, (_remainingSeconds ?? 0) - _nativeCreditClock.elapsed.inSeconds);
+    return '${(seconds ~/ 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
 
   // ── Assets (loaded once at boot) ──────────────────────────────────────────
   String _logoBase64 = '';
@@ -1311,7 +1316,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // Worker rt.js starts next to itself (./frame-metadata-worker.js) in Chrome.
   // Without it the encoded-frame pipeline stalls and no AI video arrives.
   Uint8List? _workerBytes;
-  Uint8List? _aiOutputWorkerBytes;
 
   // Content fingerprint of rt.js, added to its URL (?v=…). The WebView caches
   // rt.js on disk across launches, so without this a replaced SDK file keeps
@@ -1326,13 +1330,16 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAssets().then((_) => _boot());
+    if (Platform.isWindows) {
+      _boot();
+    } else {
+      _loadAssets().then((_) => _boot());
+    }
   }
 
   @override
   void dispose() {
-    _closeWindowsOutput();
-    _closeStudioStatus();
+    _windowsRunning = false;
     _heartbeatTimer?.cancel();
     for (final c in _sseClients) {
       try {
@@ -1380,14 +1387,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       debugPrint('[RealtimeScreen] WARNING: frame-metadata-worker.js '
           'not found: $e');
     }
-    if (Platform.isWindows) {
-      try {
-        final bytes = await rootBundle.load('assets/js/ai-output-worker.js');
-        _aiOutputWorkerBytes = bytes.buffer.asUint8List();
-      } catch (error) {
-        debugPrint('[RealtimeScreen] AI output worker unavailable: $error');
-      }
-    }
   }
 
   /// FNV-1a (32-bit) over the bytes + their length. Cheap, deterministic,
@@ -1408,6 +1407,25 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       _phase = _Phase.fetchingToken;
       _error = null;
     });
+
+    if (Platform.isWindows) {
+      try {
+        final cameras = await listWindowsXmaxCameras();
+        if (!mounted) return;
+        setState(() {
+          _windowsCameras = cameras;
+          _phase = _Phase.ready;
+        });
+        _openWindowsPreview();
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _error = ErrorHandler.sanitize(error);
+          _phase = _Phase.error;
+        });
+      }
+      return;
+    }
 
     try {
       if (!mounted) return;
@@ -1458,167 +1476,253 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       return;
     }
 
-    if (!mounted) return;
-    setState(() => _phase = _Phase.ready);
-    if (Platform.isWindows) await _openBrowserStudio();
+    if (mounted) setState(() => _phase = _Phase.ready);
   }
 
-  Future<void> _openBrowserStudio() async {
+  void _openWindowsPreview() {
+    if (!mounted || _windowsTask != null) return;
+    _windowsTask = _runWindowsSession(live: false);
+  }
+
+  Future<void> _startWindowsStream() async {
+    if (!_previewReady || _windowsBusy) return;
+    setState(() => _windowsBusy = true);
+    await _endWindowsSession();
+    if (!mounted) return;
+    _windowsTask = _runWindowsSession(live: true);
+  }
+
+  Future<void> _stopWindowsStream() async {
+    setState(() => _windowsRunning = false);
+    _stopHeartbeat();
+    await _windowsTask;
+    _openWindowsPreview();
+  }
+
+  Future<void> _endWindowsSession() async {
+    _windowsRunning = false;
+    await _windowsTask;
+  }
+
+  Future<void> _runWindowsSession({required bool live}) async {
+    _windowsRunning = true;
+    int? session;
+    final frameClock = Stopwatch()..start();
+    final outputClock = Stopwatch()..start();
+    var reportedSecond = -1;
     try {
-      if (await launchUrl(_studioUri, mode: LaunchMode.externalApplication)) {
-        if (mounted) setState(() => _error = null);
-        return;
+      var token = '';
+      var prompt = '';
+      var reference = '';
+      if (live) {
+        final config = await ApiService.instance.getRealtimeToken(
+          faceImageBase64: widget.faceImageBase64,
+          prompt: widget.prompt,
+        );
+        if (!mounted || !_windowsRunning) return;
+        final code = config['statusCode'];
+        if (code != null && code != 200) {
+          throw Exception(config['error'] ?? 'Failed to get stream token.');
+        }
+        if (config['model'] != 'x2.1') {
+          throw StateError('Native Windows streaming requires X2.1.');
+        }
+        _creditsRemaining = (config['credits_remaining'] as num?)?.toDouble();
+        _creditsPerSecond =
+            (config['credits_per_second'] as num?)?.toDouble() ?? 2;
+        if (_creditsRemaining case final credits?) {
+          context.read<AuthProvider>().updateCredits(credits);
+        }
+        token = config['token'] as String;
+        prompt = config['prompt'] as String? ?? '';
+        reference = config['reference_url'] as String? ?? '';
+      }
+      final handle =
+          await startWindowsXmax(token, prompt, reference, _windowsCamera);
+      session = handle;
+      if (!mounted || !_windowsRunning) return;
+      final (camera, result) = windowsXmaxTextures(handle);
+      setState(() {
+        _cameraTexture = camera;
+        _resultTexture = live ? result : null;
+        _windowsOutputSession = live ? handle : null;
+      });
+      frameClock.reset();
+      while (mounted && _windowsRunning) {
+        final changed = pollWindowsXmax(handle);
+        if (!mounted || !_windowsRunning) break;
+        if (changed & 1 != 0 && !_previewReady) {
+          setState(() => _previewReady = true);
+        }
+        if (changed & 2 != 0) {
+          if (!_nativeLive) {
+            _startHeartbeat();
+            _nativeCreditClock
+              ..reset()
+              ..start();
+            setState(() => _nativeLive = true);
+          }
+          outputClock.reset();
+        }
+        if (changed & 4 != 0) {
+          setState(() => _error = 'Could not display the AI Output window.');
+        }
+        final seconds = _nativeCreditClock.elapsed.inSeconds;
+        if (_nativeLive && seconds != reportedSecond) {
+          reportedSecond = seconds;
+          setState(() {});
+        }
+        if (live && outputClock.elapsed.inSeconds >= 30) {
+          throw StateError(
+              'No generated video arrived. Check your connection and try again.');
+        }
+        if (!live && !_previewReady && frameClock.elapsed.inSeconds >= 10) {
+          throw StateError(
+              'No camera video arrived. Check the selected camera and try again.');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 16));
       }
     } catch (error) {
-      debugPrint('[RealtimeScreen] Browser launch failed: $error');
-    }
-    if (mounted) {
-      setState(
-          () => _error = 'Copy the studio link and open it in your browser.');
+      if (mounted && _windowsRunning) {
+        setState(() => _error = error is StateError
+            ? error.message.toString()
+            : ErrorHandler.sanitize(error));
+      }
+    } finally {
+      _stopHeartbeat();
+      _nativeCreditClock.stop();
+      if (mounted) {
+        setState(() {
+          _previewReady = false;
+          _nativeLive = false;
+          _cameraTexture = null;
+          _resultTexture = null;
+          _windowsOutputSession = null;
+        });
+      }
+      try {
+        if (session != null) await stopWindowsXmax(session);
+      } finally {
+        _windowsTask = null;
+        if (mounted) {
+          setState(() {
+            if (live) _windowsBusy = false;
+          });
+        }
+      }
     }
   }
 
-  Widget _buildBrowserStudio() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Streaming studio', style: TextStyle(fontSize: 24)),
-            const SizedBox(height: 12),
-            Text(_error ??
-                'Keep RealFaceAI open while streaming in your browser.'),
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 12,
-              alignment: WrapAlignment.center,
-              children: [
-                FilledButton(
-                  onPressed: _openBrowserStudio,
-                  child: const Text('Open studio in browser'),
-                ),
+  Future<void> _selectWindowsCamera(String? camera) async {
+    if (_windowsBusy || _changingCamera) return;
+    setState(() => _changingCamera = true);
+    await _endWindowsSession();
+    if (!mounted) return;
+    setState(() {
+      _windowsCamera = camera ?? '';
+      _changingCamera = false;
+      _error = null;
+    });
+    _openWindowsPreview();
+  }
+
+  Widget _buildWindowsStream() {
+    Widget video(int? texture, String placeholder) => Expanded(
+          child: ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: texture == null
+                  ? Text(placeholder)
+                  : AspectRatio(
+                      aspectRatio: 16 / 9,
+                      child: Texture(textureId: texture),
+                    ),
+            ),
+          ),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              OutlinedButton(
+                onPressed: _onPageBack,
+                child: const Text('Back to studio'),
+              ),
+              FilledButton(
+                onPressed: !_windowsBusy
+                    ? (_previewReady && !_changingCamera
+                        ? _startWindowsStream
+                        : null)
+                    : _windowsRunning
+                        ? _stopWindowsStream
+                        : null,
+                child: Text(_windowsBusy ? 'Stop stream' : 'Start stream'),
+              ),
+              DropdownButton<String>(
+                value: _windowsCamera,
+                items: [
+                  const DropdownMenuItem(
+                    value: '',
+                    child: Text('Default camera'),
+                  ),
+                  for (final camera in _windowsCameras.entries)
+                    DropdownMenuItem(
+                      value: camera.key,
+                      child: Text(camera.value),
+                    ),
+                ],
+                onChanged: _windowsBusy || _changingCamera
+                    ? null
+                    : _selectWindowsCamera,
+              ),
+              OutlinedButton(
+                onPressed: _nativeLive && _windowsRunning
+                    ? () {
+                        if (_windowsOutputSession case final session?) {
+                          openWindowsXmaxOutput(session);
+                        }
+                      }
+                    : null,
+                child: const Text('Open AI Output'),
+              ),
+              if (_creditsText case final credits?) Text(credits),
+              if (_nativeLive && _remainingSeconds != null)
+                Text('Time left: $_nativeTimeLeft'),
+              if (!_windowsBusy && !_previewReady && _windowsTask == null)
                 OutlinedButton(
-                  onPressed: () async {
-                    await Clipboard.setData(
-                        ClipboardData(text: _studioUri.toString()));
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Studio link copied.')),
-                      );
-                    }
-                  },
-                  child: const Text('Copy studio link'),
+                  onPressed: () => _selectWindowsCamera(_windowsCamera),
+                  child: const Text('Preview camera'),
                 ),
-                TextButton(
-                    onPressed: _onPageBack,
-                    child: const Text('Back to studio')),
+            ],
+          ),
+          if (_error case final error?)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(error),
+            ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (!_nativeLive) video(_cameraTexture, 'Camera preview'),
+                if (_windowsBusy) ...[
+                  if (!_nativeLive) const SizedBox(width: 12),
+                  video(_resultTexture, 'Waiting for generated video…'),
+                ],
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
-  }
-
-  Future<void> _handleStudioEvent(HttpRequest request, String event) async {
-    final isStatus = event == 'status';
-    final valid = isStatus
-        ? request.method == 'GET'
-        : request.method == 'POST' &&
-            request.headers.value('origin') == _studioUri.origin;
-    if (!valid) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await request.response.close();
-      return;
-    }
-
-    var ok = true;
-    switch (event) {
-      case 'start':
-        ok = _browserStopReason == null && !_browserRetrying;
-        if (ok && _heartbeatTimer == null) {
-          _browserContact = DateTime.now();
-          _onPageStarted();
-        }
-      case 'status':
-        _browserContact = DateTime.now();
-      case 'stop':
-      case 'back':
-        _closeWindowsOutput();
-        _closeStudioStatus();
-        _stopHeartbeat();
-      case 'retry':
-        if (_browserRetrying || _heartbeatTimer != null) {
-          ok = false;
-          break;
-        }
-        _browserRetrying = true;
-        try {
-          ok = await _refreshStreamForRetry();
-          if (ok) _browserStopReason = null;
-        } finally {
-          _browserRetrying = false;
-        }
-      default:
-        ok = false;
-    }
-    request.response
-      ..headers.contentType = ContentType.json
-      ..headers.set('Cache-Control', 'no-store')
-      ..write(_studioStatusJson(ok: ok));
-    await request.response.close();
-    if (event == 'back') _onPageBack();
-  }
-
-  String _studioStatusJson({bool ok = true}) => jsonEncode({
-        'ok': ok,
-        'credits': _creditsText,
-        'seconds': _remainingSeconds,
-        'revision': _creditRevision,
-        'stopReason': _browserStopReason,
-      });
-
-  void _closeStudioStatus() {
-    final socket = _studioStatusSocket;
-    _studioStatusSocket = null;
-    if (socket != null) {
-      unawaited(socket.close().then<void>((_) {}, onError: (Object _) {}));
-    }
-  }
-
-  Future<void> _handleStudioStatus(HttpRequest request) async {
-    if (!mounted ||
-        _heartbeatTimer == null ||
-        request.headers.value('origin') != _studioUri.origin ||
-        !WebSocketTransformer.isUpgradeRequest(request)) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await request.response.close();
-      return;
-    }
-    final socket = await WebSocketTransformer.upgrade(request);
-    if (!mounted || _heartbeatTimer == null || _studioStatusSocket != null) {
-      await socket.close();
-      return;
-    }
-    _studioStatusSocket = socket;
-    socket.pingInterval = const Duration(seconds: 15);
-    try {
-      socket.add(_studioStatusJson());
-      await socket.drain<void>();
-    } catch (error) {
-      debugPrint('[RealtimeScreen] Studio status connection closed: $error');
-    } finally {
-      if (_studioStatusSocket == socket) {
-        _studioStatusSocket = null;
-        _browserContact = DateTime.now();
-      }
-    }
-  }
-
-  void _pushStudioStatus() {
-    final socket = _studioStatusSocket;
-    if (socket?.readyState == WebSocket.open) socket!.add(_studioStatusJson());
   }
 
   /// Reads the model + prompt the backend chose for this session.
@@ -1636,22 +1740,9 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   // ── Heartbeat (deducts credits on backend every 10 s) ─────────────────────
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    var heartbeatInFlight = false;
     _heartbeatTimer =
         Timer.periodic(const Duration(seconds: 10), (timer) async {
-      if (heartbeatInFlight) return;
-      heartbeatInFlight = true;
       try {
-        final contact = _browserContact;
-        if (Platform.isWindows &&
-            _studioStatusSocket == null &&
-            contact != null &&
-            DateTime.now().difference(contact).inSeconds >= 35) {
-          _stopPage(
-              'The browser disconnected. Return to RealFaceAI to start a new session.');
-          _stopHeartbeat();
-          return;
-        }
         final result = await ApiService.instance.streamHeartbeat();
         if (!mounted || timer != _heartbeatTimer) return;
         // Stop on: out of credits (402), account frozen/suspended (403) or
@@ -1663,9 +1754,9 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (newCredits != null) {
           _creditsRemaining = newCredits;
           context.read<AuthProvider>().updateCredits(newCredits);
-          _creditRevision++;
           if (Platform.isWindows) {
-            _pushStudioStatus();
+            _nativeCreditClock.reset();
+            setState(() {});
           } else {
             _pushCreditsUpdate();
           }
@@ -1681,8 +1772,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         }
       } catch (e) {
         debugPrint('[RealtimeScreen] heartbeat failed: $e');
-      } finally {
-        heartbeatInFlight = false;
       }
     });
   }
@@ -1694,8 +1783,10 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
   void _stopPage(String reason) {
     if (Platform.isWindows) {
-      _browserStopReason = reason;
-      _pushStudioStatus();
+      setState(() {
+        _windowsRunning = false;
+        _error = reason;
+      });
       return;
     }
     _webViewController?.evaluateJavascript(
@@ -1727,12 +1818,11 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   }
 
   /// An explicit retry needs a fresh token for the reloaded page.
-  Future<bool> _refreshStreamForRetry() async {
-    if (!mounted) return false;
+  Future<void> _refreshStreamForRetry() async {
+    if (!mounted) return;
     try {
       final result = await ApiService.instance.getRealtimeToken(
         faceImageBase64: widget.faceImageBase64,
-        prompt: widget.prompt,
       );
       if (mounted && result['statusCode'] == 200) {
         _applyStreamConfig(result);
@@ -1743,13 +1833,12 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         if (_creditsRemaining case final credits?) {
           context.read<AuthProvider>().updateCredits(credits);
         }
-        return true;
       }
     } catch (_) {}
-    return false;
   }
 
   void _onPageBack() {
+    _windowsRunning = false;
     _stopHeartbeat();
     if (mounted) context.go('/playground');
   }
@@ -1767,84 +1856,12 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
     server.listen(_handleRequest);
   }
 
-  void _closeWindowsOutput() {
-    final socket = _aiOutputSocket;
-    if (socket == null) return;
-    _aiOutputSocket = null;
-    _windowsAiOutput.close();
-    unawaited(socket.close().then<void>((_) {}, onError: (Object _) {}));
-  }
-
-  Future<void> _handleWindowsOutput(HttpRequest request) async {
-    if (!mounted ||
-        _heartbeatTimer == null ||
-        _aiOutputSocket != null ||
-        request.headers.value('origin') != _studioUri.origin ||
-        !WebSocketTransformer.isUpgradeRequest(request)) {
-      request.response.statusCode = HttpStatus.forbidden;
-      await request.response.close();
-      return;
-    }
-
-    final socket = await WebSocketTransformer.upgrade(request,
-        compression: CompressionOptions.compressionOff);
-    if (!mounted || _heartbeatTimer == null || _aiOutputSocket != null) {
-      await socket.close();
-      return;
-    }
-    _aiOutputSocket = socket;
-    try {
-      await for (final packet in socket) {
-        if (_aiOutputSocket != socket || packet is! List<int>) break;
-        if (packet.length > 8 + 960 * 540 * 4) break;
-        final bytes = packet is Uint8List ? packet : Uint8List.fromList(packet);
-        if (!_windowsAiOutput.present(bytes)) break;
-        _browserContact = DateTime.now();
-        socket.add('ready');
-      }
-    } catch (error) {
-      debugPrint('[RealtimeScreen] AI Output disconnected: $error');
-    } finally {
-      if (_aiOutputSocket == socket) _closeWindowsOutput();
-    }
-  }
-
   Future<void> _handleRequest(HttpRequest req) async {
-    var path = req.uri.path;
-    if (Platform.isWindows) {
-      final inStudio = path == _studioPath || path.startsWith('$_studioPath/');
-      if (!inStudio || req.headers.value('host') != _studioUri.authority) {
-        req.response.statusCode = HttpStatus.notFound;
-        await req.response.close();
-        return;
-      }
-      path = path.substring(_studioPath.length);
-      req.response.headers
-        ..set('Referrer-Policy', 'no-referrer')
-        ..set('Content-Security-Policy', "frame-ancestors 'none'");
-      if (path == '/studio-status') {
-        await _handleStudioStatus(req);
-        return;
-      }
-      if (path == '/output-frames') {
-        await _handleWindowsOutput(req);
-        return;
-      }
-      if (path.startsWith('/event/')) {
-        await _handleStudioEvent(req, path.substring('/event/'.length));
-        return;
-      }
-      if (path == '/push' && req.headers.value('origin') != _studioUri.origin) {
-        req.response.statusCode = HttpStatus.forbidden;
-        await req.response.close();
-        return;
-      }
-    } else {
-      req.response.headers.set('Access-Control-Allow-Origin', '*');
-    }
+    final path = req.uri.path;
 
     // CORS + camera permission headers on every response
     req.response.headers
+      ..set('Access-Control-Allow-Origin', '*')
       ..set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
       ..set('Access-Control-Allow-Headers', 'Content-Type')
       ..set('Feature-Policy', 'camera *; microphone *')
@@ -1880,18 +1897,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
             ..add(sdk)
             ..close();
         }
-
-      case '/static/ai-output-worker.js':
-        final worker = _aiOutputWorkerBytes;
-        if (!Platform.isWindows || worker == null) {
-          req.response.statusCode = HttpStatus.notFound;
-        } else {
-          req.response
-            ..headers.contentType = ContentType('application', 'javascript')
-            ..headers.set('Cache-Control', 'no-store')
-            ..add(worker);
-        }
-        await req.response.close();
 
       case '/static/frame-metadata-worker.js':
         final worker = _workerBytes;
@@ -1955,7 +1960,8 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
           ..headers
               .set('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
           ..headers.set('Cache-Control', 'no-cache')
-          ..headers.set('Connection', 'keep-alive');
+          ..headers.set('Connection', 'keep-alive')
+          ..headers.set('Access-Control-Allow-Origin', '*');
         final snap = _latestFrameBytes;
         if (snap != null) {
           req.response
@@ -2000,8 +2006,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
       default:
         // Unknown static file: a real 404, not the HTML page (a script
         // served as text/html fails with a confusing MIME error).
-        if (path.startsWith('/static/') ||
-            (Platform.isWindows && path.isNotEmpty && path != '/')) {
+        if (path.startsWith('/static/')) {
           req.response
             ..statusCode = 404
             ..close();
@@ -2060,7 +2065,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
   const img = document.getElementById('frame');
   const msg = document.getElementById('msg');
   function connect() {
-    img.src = './stream?t=' + Date.now();
+    img.src = '/stream?t=' + Date.now();
     img.onload  = () => { msg.style.display = 'none'; };
     img.onerror = () => { setTimeout(connect, 1000); };
   }
@@ -2089,8 +2094,6 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
         : '';
     final port = _port.toString();
     final windowsJs = Platform.isWindows ? 'true' : 'false';
-    final studioBase =
-        Platform.isWindows ? _studioUri.toString() : 'http://127.0.0.1:$port';
     final preferredCamera = _escape(_preferredCameraLabel);
     final sdkVersion = _sdkVersion;
     final initialCredits = jsonEncode(_creditsText);
@@ -2104,7 +2107,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>${Platform.isWindows ? 'RealFaceAI Studio - Controls' : 'RealFaceAI · Live'}</title>
+<title>RealFaceAI · Live</title>
 <style>
   :root {
     /* RealFaceAI monitor palette (mirrors AppColors) */
@@ -2281,7 +2284,7 @@ class _RealtimeStreamScreenState extends State<RealtimeStreamScreen> {
 
 <!-- SDK served locally — no external URLs, no provider branding in traffic -->
 <script type="importmap">
-  { "imports": { "rt-sdk": "$studioBase/static/rt.js?v=$sdkVersion" } }
+  { "imports": { "rt-sdk": "http://127.0.0.1:$port/static/rt.js?v=$sdkVersion" } }
 </script>
 </head>
 <body>
@@ -2422,120 +2425,12 @@ const FACE_PROMPT = '$safePrompt';      // chosen by the backend
 const PROMPT_ENHANCE = $enhanceJs;
 const FACE_URL = '$faceDataUrl';
 const REFERENCE_URL = '$safeReference'; // face uploaded by the backend, if it could
-const SERVER   = '$studioBase';
+const SERVER   = 'http://127.0.0.1:$port';
 const IS_WINDOWS = $windowsJs;
 let preferredCameraLabel = '$preferredCamera';
 
-let browserRun = 0;
-let browserTimer;
-let lastCreditRevision = -1;
-
-async function studioEvent(name) {
-  const response = await fetch(SERVER + '/event/' + name, {
-    method: name === 'status' ? 'GET' : 'POST',
-    cache: 'no-store',
-    ...(name === 'status' ? { signal: AbortSignal.timeout(5000) } : {}),
-  });
-  if (!response.ok) throw new Error('RealFaceAI disconnected.');
-  return response.json();
-}
-
-let studioSocket = null;
-let studioDisconnectedAt = null;
-
-function updateStudioStatus(state) {
-  studioDisconnectedAt = null;
-  if (state.stopReason) {
-    window.stopStream(state.stopReason);
-    return;
-  }
-  if (lastCreditRevision !== state.revision) {
-    lastCreditRevision = state.revision;
-    window.updateStreamCredits(state.credits, state.seconds);
-  }
-}
-
-function closeStudioStatus() {
-  clearTimeout(browserTimer);
-  const socket = studioSocket;
-  studioSocket = null;
-  socket?.close();
-}
-
-function watchStudio(run) {
-  if (browserRun !== run || !_sessionStarted) return;
-  const url = new URL(SERVER + '/studio-status');
-  url.protocol = 'ws:';
-  const socket = new WebSocket(url);
-  studioSocket = socket;
-  socket.onmessage = event => {
-    if (studioSocket === socket && browserRun === run && _sessionStarted) {
-      updateStudioStatus(JSON.parse(event.data));
-    }
-  };
-  socket.onclose = async () => {
-    if (studioSocket !== socket || browserRun !== run || !_sessionStarted) return;
-    studioSocket = null;
-    try {
-      const state = await studioEvent('status');
-      if (browserRun !== run || !_sessionStarted) return;
-      updateStudioStatus(state);
-    } catch (_) {
-      // A brief local connection failure shouldn't end the Xmax session.
-      if (browserRun !== run || !_sessionStarted) return;
-      studioDisconnectedAt ??= Date.now();
-      if (Date.now() - studioDisconnectedAt >= 30000) {
-        window.stopStream('RealFaceAI disconnected. Reopen the studio from the app.');
-        return;
-      }
-    }
-    if (browserRun === run && _sessionStarted) {
-      browserTimer = setTimeout(() => watchStudio(run), 2000);
-    }
-  };
-}
-
 function notifyApp(name, arg) {
-  if (!IS_WINDOWS) return window.flutter_inappwebview?.callHandler(name, arg);
-  switch (name) {
-    case 'onStreamStarted': {
-      const run = ++browserRun;
-      void studioEvent('start').then(state => {
-        if (browserRun !== run || !_sessionStarted) return;
-        if (state.ok) return watchStudio(run);
-        window.stopStream(state.stopReason || 'Could not start the session.');
-      }).catch(() => {
-        if (browserRun === run && _sessionStarted) window.stopStream('RealFaceAI disconnected.');
-      });
-      break;
-    }
-    case 'onStreamStopped':
-    case 'onError':
-      browserRun++;
-      closeStudioStatus();
-      void studioEvent('stop').catch(() => {});
-      break;
-    case 'onStreamRetry':
-      return studioEvent('retry').then(state => {
-        if (state.ok) location.reload();
-        else errMsg.textContent = 'Could not prepare a new session. Try again.';
-      }).catch(() => { errMsg.textContent = 'Open the studio again from RealFaceAI.'; });
-    case 'onGoBack':
-      browserRun++;
-      closeStudioStatus();
-      document.body.textContent = 'Returned to RealFaceAI. You can close this tab.';
-      void studioEvent('back').catch(() => {});
-      break;
-    case 'copyObsUrl':
-      return navigator.clipboard?.writeText(SERVER + '/popout').then(() => true);
-  }
-}
-
-if (IS_WINDOWS) {
-  window.addEventListener('pagehide', () => {
-    closeStudioStatus();
-    if (_sessionStarted) navigator.sendBeacon(SERVER + '/event/stop');
-  });
+  return window.flutter_inappwebview?.callHandler(name, arg);
 }
 
 // ── Camera ────────────────────────────────────────────────────────────────────
@@ -2721,145 +2616,15 @@ const obsVirtualCameraSteps = document.getElementById('obsVirtualCameraSteps');
 const obsHelp       = document.getElementById('obsHelp');
 const obsCopyStatus = document.getElementById('obsCopyStatus');
 
-let aiOutputSocket = null;
-let aiOutputWorker = null;
-let aiOutputCallback = null;
-
-function closeAiOutput() {
-  aiOutputWorker?.terminate();
-  aiOutputWorker = null;
-  const socket = aiOutputSocket;
-  aiOutputSocket = null;
-  if (aiOutputCallback !== null) {
-    remoteVideo.cancelVideoFrameCallback(aiOutputCallback);
-    aiOutputCallback = null;
-  }
-  socket?.close();
-}
-
-function outputIsOpen() {
-  return aiOutputWorker !== null || aiOutputSocket !== null;
-}
-
-function showAiOutputReady() {
-  obsWaiting.textContent = 'Capture “RealFaceAI Video Only (OBS)” from RealFaceAI.exe. Set Window Match Priority to “Window title must match”.';
-}
-
-function showAiOutputClosed(message) {
-  closeAiOutput();
-  obsBtn.disabled = !_sessionStarted;
-  obsWaiting.textContent = message;
-}
-
-function openTrackOutput(url, track) {
-  if (typeof MediaStreamTrackProcessor !== 'function') return false;
-  let worker;
-  let readable;
-  try {
-    worker = new Worker(SERVER + '/static/ai-output-worker.js');
-    readable = new MediaStreamTrackProcessor({ track, maxBufferSize: 1 }).readable;
-    worker.postMessage({ readable, url: url.href }, [readable]);
-  } catch (_) {
-    worker?.terminate();
-    readable?.cancel().catch(() => {});
-    return false;
-  }
-  aiOutputWorker = worker;
-  worker.onmessage = ({ data }) => {
-    if (aiOutputWorker !== worker) return;
-    if (data === 'ready') showAiOutputReady();
-    if (data === 'closed' || data === 'failed') {
-      showAiOutputClosed('The video-only window closed. Select Open AI Output to reopen it.');
-    }
-  };
-  worker.onerror = () => {
-    if (aiOutputWorker !== worker) return;
-    showAiOutputClosed('Could not open video-only capture. Reload the studio and try again.');
-  };
-  return true;
-}
-
-function openAiOutput() {
-  const track = remoteVideo.srcObject?.getVideoTracks?.()[0];
-  if (!track || outputIsOpen()) return;
-  const url = new URL(SERVER + '/output-frames');
-  url.protocol = 'ws:';
-  obsBtn.disabled = true;
-  obsWaiting.textContent = 'Opening AI Output…';
-  obsWaiting.hidden = false;
-  if (openTrackOutput(url, track)) return;
-  const socket = new WebSocket(url);
-  aiOutputSocket = socket;
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d', { willReadFrequently: true });
-  let pending = false;
-  let lastFrameAt = -Infinity;
-
-  function sendFrame(now) {
-    aiOutputCallback = null;
-    if (aiOutputSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
-    aiOutputCallback = remoteVideo.requestVideoFrameCallback(sendFrame);
-    if (pending || now - lastFrameAt < 40 ||
-        !remoteVideo.videoWidth || !remoteVideo.videoHeight) return;
-    const scale = Math.min(1, 960 / remoteVideo.videoWidth, 540 / remoteVideo.videoHeight);
-    const width = Math.max(1, Math.floor(remoteVideo.videoWidth * scale));
-    const height = Math.max(1, Math.floor(remoteVideo.videoHeight * scale));
-    if (canvas.width !== width) canvas.width = width;
-    if (canvas.height !== height) canvas.height = height;
-    try {
-      context.drawImage(remoteVideo, 0, 0, width, height);
-      const header = new DataView(new ArrayBuffer(8));
-      header.setUint32(0, width, true);
-      header.setUint32(4, height, true);
-      pending = true;
-      lastFrameAt = now;
-      socket.send(new Blob([header.buffer, context.getImageData(0, 0, width, height).data]));
-    } catch (_) {
-      closeAiOutput();
-      obsWaiting.textContent = 'Could not send video to the AI Output window.';
-      obsBtn.disabled = !_sessionStarted;
-    }
-  }
-
-  obsBtn.disabled = true;
-  obsWaiting.textContent = 'Opening AI Output…';
-  obsWaiting.hidden = false;
-  socket.onopen = () => {
-    if (aiOutputSocket !== socket) return;
-    aiOutputCallback = remoteVideo.requestVideoFrameCallback(sendFrame);
-  };
-  socket.onmessage = () => {
-    if (aiOutputSocket !== socket) return;
-    pending = false;
-    showAiOutputReady();
-  };
-  socket.onclose = () => {
-    if (aiOutputSocket !== socket) return;
-    closeAiOutput();
-    obsBtn.disabled = !_sessionStarted;
-    obsWaiting.textContent = 'AI Output closed. Select Open AI Output to reopen it.';
-  };
-}
-
-if (IS_WINDOWS) {
-  obsLabel.textContent = 'Open AI Output';
-  obsWaiting.textContent = 'Start streaming to open the generated video in a separate window.';
-  window.addEventListener('pagehide', closeAiOutput);
-}
-
 remoteVideo.addEventListener('playing', () => {
   if (!realtime) return;
-  obsBtn.disabled = IS_WINDOWS && outputIsOpen();
-  obsWaiting.hidden = !IS_WINDOWS;
-  if (IS_WINDOWS && !outputIsOpen()) {
-    obsWaiting.textContent = 'Open the AI Output window for OBS Window Capture.';
-  }
+  obsBtn.disabled = false;
+  obsWaiting.hidden = true;
 });
-
 
 function _obsUiOff() {
   obsBtn.classList.remove('active');
-  obsLabel.textContent      = IS_WINDOWS ? 'Open AI Output' : 'Send output to OBS';
+  obsLabel.textContent      = 'Send output to OBS';
   obsUrlBadge.style.display = 'none';
   obsUrlInput.value         = '';
   obsSteps.hidden = true;
@@ -2873,17 +2638,11 @@ function resetObsOutput() {
   _stopObsRelay();
   _obsUiOff();
   obsBtn.disabled = true;
-  obsWaiting.textContent = IS_WINDOWS
-      ? 'Start streaming to open the generated video in a separate window.'
-      : 'Start Realtime to send live video to OBS.';
+  obsWaiting.textContent = 'Start Realtime to send live video to OBS.';
   obsWaiting.hidden = false;
 }
 
 window.toggleObs = function() {
-  if (IS_WINDOWS) {
-    openAiOutput();
-    return;
-  }
   if (_obsRelayActive) {
     _stopObsRelay();
     _obsUiOff();
@@ -3003,7 +2762,6 @@ function friendlySdkError(e) {
 
 // Ends the SDK session; our camera tracks are stopped by the caller.
 function teardownSession() {
-  closeAiOutput();
   const rt = realtime;
   realtime = null;
   rtLocal  = null;
@@ -3278,12 +3036,7 @@ window.addEventListener('load', function() {
   document.getElementById('retryBtn').addEventListener('click', function() { location.reload(); });
   ['backBtn', 'goBackBtn'].forEach(function(id) {
     document.getElementById(id).addEventListener('click', function() {
-      if ($windowsJs) {
-        document.body.textContent = 'Returned to RealFaceAI. You can close this tab.';
-        fetch('$studioBase/event/back', { method: 'POST' }).catch(() => {});
-      } else if (window.flutter_inappwebview) {
-        window.flutter_inappwebview.callHandler('onGoBack');
-      }
+      if (window.flutter_inappwebview) window.flutter_inappwebview.callHandler('onGoBack');
     });
   });
   fail();
@@ -3318,7 +3071,7 @@ window.addEventListener('load', function() {
         fit: StackFit.expand,
         children: [
           if (_phase == _Phase.ready && Platform.isWindows)
-            _buildBrowserStudio()
+            _buildWindowsStream()
           else if (_phase == _Phase.ready && _port != null)
             InAppWebView(
               initialUrlRequest: URLRequest(
@@ -3384,7 +3137,7 @@ window.addEventListener('load', function() {
                   handlerName: 'onStreamRetry',
                   callback: (_) async {
                     _stopHeartbeat();
-                    if (!await _refreshStreamForRetry()) return;
+                    await _refreshStreamForRetry();
                     // Reload the WebView — new token will be baked into fresh HTML
                     if (mounted && _phase == _Phase.ready) {
                       await controller.reload();
