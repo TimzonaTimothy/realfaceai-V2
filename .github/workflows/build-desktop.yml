@@ -78,7 +78,13 @@ jobs:
       # Before MSIX: msix writes its .msix into the Release folder, and the
       # installer packs that whole folder.
       - name: Compile installer
-        run: '& $env:INNO_COMPILER "/DAppVer=${{ steps.version.outputs.version }}" installer.iss'
+        run: |
+          $signature = Get-AuthenticodeSignature -LiteralPath '.\installer\MicrosoftEdgeWebview2Setup.exe'
+          if ($signature.Status -ne 'Valid' -or
+              $signature.SignerCertificate.GetNameInfo('SimpleName', $false) -ne 'Microsoft Corporation') {
+            throw 'The bundled WebView2 installer needs a valid Microsoft signature.'
+          }
+          & $env:INNO_COMPILER "/DAppVer=${{ steps.version.outputs.version }}" installer.iss
 
       # Answers "No" to the certificate prompt; reuses the build above.
       - name: Create MSIX

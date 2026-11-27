@@ -100,9 +100,10 @@ last command. Set `$iscc` to the corresponding path if you installed it in a
 different directory.
 
 The installer is written to `installer_output\RealFaceAI-Setup-<version>.exe`.
-Windows streaming uses the WebView2 Runtime installed on the PC. If the runtime
-is missing, select **Download WebView2** on the streaming screen, install it
-from Microsoft, then select **Try again**.
+Setup runs the bundled Microsoft Evergreen WebView2 Bootstrapper if the
+machine-wide runtime is missing. This step needs an internet connection.
+If the runtime is still unavailable, select **Download WebView2** on the
+streaming screen, install it from Microsoft, then select **Try again**.
 
 ### Build a signed installer for direct downloads
 

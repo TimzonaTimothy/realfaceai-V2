@@ -25,6 +25,8 @@ Source: "build\windows\x64\runner\Release\*"; \
     DestDir: "{app}"; Flags: recursesubdirs ignoreversion
 Source: "installer\VC_redist.x64.exe"; \
     DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "installer\MicrosoftEdgeWebview2Setup.exe"; \
+    DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [UninstallDelete]
 ; Saved login tokens + settings (shared_preferences: %APPDATA%\CompanyName\
@@ -41,5 +43,20 @@ Filename: "{tmp}\VC_redist.x64.exe"; \
     Parameters: "/install /quiet /norestart"; \
     StatusMsg: "Installing Visual C++ Runtime..."; \
     Flags: waituntilterminated
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; \
+    Parameters: "/silent /install"; \
+    StatusMsg: "Installing WebView2 Runtime..."; \
+    Flags: waituntilterminated; Check: NeedsWebView2
 Filename: "{app}\RealFaceAI.exe"; \
     Description: "Launch RealFaceAI"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function NeedsWebView2: Boolean;
+var
+  Version: String;
+begin
+  { Setup installs for all users, so check the machine-wide Evergreen runtime. }
+  Result := not RegQueryStringValue(HKLM32,
+    'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+    'pv', Version) or (Version = '') or (Version = '0.0.0.0');
+end;
